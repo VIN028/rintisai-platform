@@ -1,0 +1,109 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id             String         @id @default(uuid())
+  email          String         @unique
+  password       String
+  name           String?
+  role           String         @default("USER") // USER | ADMIN
+  assignedApiKey    String?
+  resetCode      String?
+  resetCodeExpires DateTime?
+  emailVerifiedAt DateTime?
+  emailVerifyToken String?
+  emailVerifyExpires DateTime?
+  tokenVersion   Int       @default(0)
+  createdAt         DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  subscription   Subscription?
+  tokenUsages    TokenUsage[]
+  conversations  Conversation[]
+  apiKeys        ApiKey[]
+  upgradeRequests UpgradeRequest[]
+}
+
+model ApiKey {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  name      String   @default("VS Code Key")
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model Subscription {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan              String   @default("starter") // starter | pro | developer
+  status            String   @default("inactive") // active | inactive | expired | cancelled | suspended
+  expiryDate        DateTime
+  apiAccessEnabled  Boolean  @default(false)
+  customLimit5h     Int?
+  customLimitWeekly Int?
+  customLimitMonthly Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model TokenUsage {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  timestamp        DateTime @default(now())
+  modelUsed        String
+  promptTokens     Int
+  completionTokens Int
+  totalTokens      Int
+  source           String   @default("web") // web | api
+  apiKeyId         String?
+}
+
+model Conversation {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String    @default("Percakapan Baru")
+  shared    Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  messages  Message[]
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String       // user | assistant
+  content        String
+  createdAt      DateTime     @default(now())
+}
+
+model UpgradeRequest {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan          String   // starter | pro | developer
+  paymentMethod String   // gopay | ovo | dana | bank | crypto
+  paymentRef    String?  // user's payment reference / phone number
+  paymentProof  String?  // base64 proof image
+  uniqueCode    String?  // 3-digit unique transfer code
+  transferAmount Int?    // exact amount user should transfer
+  status        String   @default("pending") // pending | confirmed | completed | rejected
+  note          String?
+  createdAt     DateTime @default(now())
+}
+
+model Setting {
+  key   String @id
+  value String
+}
