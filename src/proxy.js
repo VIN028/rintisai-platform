@@ -33,9 +33,14 @@ const getClientIp = (request) => {
     headers.get("cf-connecting-ip"),
     headers.get("x-real-ip"),
     headers.get("x-forwarded-for")?.split(",")?.[0]?.trim(),
+    request.ip,
   ];
 
-  return candidates.find(Boolean) || "";
+  let ip = candidates.find(Boolean) || "";
+  if (ip.startsWith("::ffff:")) {
+    ip = ip.substring(7);
+  }
+  return ip;
 };
 
 const ipToNumber = (ip) => {
