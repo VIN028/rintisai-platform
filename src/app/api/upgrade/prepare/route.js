@@ -17,6 +17,9 @@ export async function POST(req) {
     
     if (plan === "topup") {
       const topupAmount = Number(amount) || 10000;
+      if (!Number.isFinite(topupAmount) || topupAmount < 10_000) {
+        return NextResponse.json({ error: "Minimum topup is Rp10.000." }, { status: 400 });
+      }
       const transferAmount = topupAmount + Number(uniqueCode);
       const credits = creditMap[topupAmount] || Math.round(topupAmount * 200);
       return NextResponse.json({ uniqueCode, transferAmount, credits, isTopup: true });

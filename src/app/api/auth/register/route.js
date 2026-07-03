@@ -9,12 +9,13 @@ const regAttempts = new Map();
 export async function POST(req) {
   try {
     const { email, password, name, website } = await req.json();
+    const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
 
     if (website) {
       return NextResponse.json({ error: "Registrasi berhasil." }, { status: 201 });
     }
 
-    if (!email || !password) {
+    if (!normalizedEmail || !password) {
       return NextResponse.json({ error: "Email and password are required." }, { status: 400 });
     }
 
@@ -38,7 +39,7 @@ export async function POST(req) {
 
     // Check if user exists
     const existingUser = await prisma.user.findUnique({
-      where: { email },
+      where: { email: normalizedEmail },
     });
 
     if (existingUser) {
@@ -55,9 +56,9 @@ export async function POST(req) {
     // Create user with inactive starter subscription. Admin activates paid access.
     const user = await prisma.user.create({
       data: {
-        email,
+        email: normalizedEmail,
         password: hashedPassword,
-        name: name || email.split("@")[0],
+        name: name || normalizedEmail.split("@")[0],
         emailVerifyToken: verification.hash,
         emailVerifyExpires: new Date(Date.now() + 24 * 60 * 60 * 1000),
         emailVerifiedAt: isEmailVerificationRequired() ? null : new Date(),

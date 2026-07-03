@@ -35,15 +35,16 @@ const recordFailedAttempt = (email) => {
 export async function POST(req) {
   try {
     const { email, password } = await req.json();
+    const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
 
-    if (!email || !password) {
+    if (!normalizedEmail || !password) {
       return NextResponse.json(
         { error: "Email dan password wajib diisi." },
         { status: 400 }
       );
     }
 
-    if (!checkBruteForce(email)) {
+    if (!checkBruteForce(normalizedEmail)) {
       return NextResponse.json(
         { error: "Too many login attempts. Please try again in 15 minutes." },
         { status: 429 }
@@ -52,12 +53,12 @@ export async function POST(req) {
 
     // Find user
     const user = await prisma.user.findUnique({
-      where: { email },
+      where: { email: normalizedEmail },
       include: { subscription: true },
     });
 
     if (!user || !user.password) {
-      recordFailedAttempt(email);
+      recordFailedAttempt(normalizedEmail);
       return NextResponse.json(
         { error: "Invalid email or password." },
         { status: 401 }
@@ -67,7 +68,7 @@ export async function POST(req) {
     // Verify password
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
-      recordFailedAttempt(email);
+      recordFailedAttempt(normalizedEmail);
       return NextResponse.json(
         { error: "Email atau password salah." },
         { status: 401 }
@@ -75,7 +76,7 @@ export async function POST(req) {
     }
 
     // Clear failed attempts on successful login
-    failedLoginMap.delete(email);
+    failedLoginMap.delete(normalizedEmail);
 
     // Check if subscription has expired
     let subscription = user.subscription;
