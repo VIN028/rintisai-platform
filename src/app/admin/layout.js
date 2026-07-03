@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Shield, Users, ShoppingCart, Activity, CreditCard, Heart } from "lucide-react";
+import { Shield, Users, ShoppingCart, Activity, CreditCard, Heart, Wrench } from "lucide-react";
 
 const links = [
   { href: "/admin", icon: Shield, label: "Dashboard", exact: true },
@@ -12,6 +12,7 @@ const links = [
   { href: "/admin/usage", icon: Activity, label: "Usage" },
   { href: "/admin/payments", icon: CreditCard, label: "Payments" },
   { href: "/admin/health", icon: Heart, label: "Health" },
+  { href: "/admin/maintenance", icon: Wrench, label: "Maintenance" },
 ];
 
 export default function AdminLayout({ children }) {
