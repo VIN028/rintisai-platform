@@ -5,9 +5,12 @@ import { authenticateAdmin } from "@/lib/auth";
 export async function GET(req) {
   try {
     await authenticateAdmin(req);
-    const count = await prisma.upgradeRequest.count({ where: { status: "pending" } });
-    return NextResponse.json({ pending: count });
+    const [upgradePending, cashoutPending] = await Promise.all([
+      prisma.upgradeRequest.count({ where: { status: "pending" } }),
+      prisma.cashoutRequest.count({ where: { status: "pending" } }).catch(() => 0),
+    ]);
+    return NextResponse.json({ pending: upgradePending + cashoutPending, upgradePending, cashoutPending });
   } catch (err) {
-    return NextResponse.json({ pending: 0 });
+    return NextResponse.json({ pending: 0, upgradePending: 0, cashoutPending: 0 });
   }
 }

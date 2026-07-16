@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import bcrypt from "bcrypt";
-import { getAuthCookieOptions, signToken } from "@/lib/auth";
+import { getAuthCookieOptions, isEmailVerificationRequired, signToken } from "@/lib/auth";
+import { expireSubscriptionIfNeeded } from "@/lib/subscription-expiry";
 
 const failedLoginMap = new Map();
+const ADMIN_2FA_CODE = process.env.ADMIN_2FA_CODE;
 
 const checkBruteForce = (email) => {
   const now = Date.now();
@@ -34,7 +36,7 @@ const recordFailedAttempt = (email) => {
 
 export async function POST(req) {
   try {
-    const { email, password } = await req.json();
+    const { email, password, adminOtp, adminOnly } = await req.json();
     const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
 
     if (!normalizedEmail || !password) {
@@ -52,12 +54,12 @@ export async function POST(req) {
     }
 
     // Find user
-    const user = await prisma.user.findUnique({
+    let user = await prisma.user.findUnique({
       where: { email: normalizedEmail },
       include: { subscription: true },
     });
 
-    if (!user || !user.password) {
+    if (!user || typeof user.password !== "string" || !user.password) {
       recordFailedAttempt(normalizedEmail);
       return NextResponse.json(
         { error: "Invalid email or password." },
@@ -78,15 +80,61 @@ export async function POST(req) {
     // Clear failed attempts on successful login
     failedLoginMap.delete(normalizedEmail);
 
-    // Check if subscription has expired
-    let subscription = user.subscription;
-    if (subscription && new Date() > new Date(subscription.expiryDate) && subscription.status === "active") {
-      // Update expired subscription
-      subscription = await prisma.subscription.update({
-        where: { id: subscription.id },
-        data: { status: "expired" },
-      });
+    if (adminOnly && user.role !== "ADMIN") {
+      return NextResponse.json({ error: "This account does not have admin access." }, { status: 403 });
     }
+
+    if (isEmailVerificationRequired() && !user.emailVerifiedAt) {
+      return NextResponse.json(
+        {
+          error: "Please verify your email first. Check your inbox for the 6-digit code.",
+          needsVerification: true,
+          email: user.email,
+        },
+        { status: 403 }
+      );
+    }
+
+    if (user.role === "ADMIN") {
+      if (!ADMIN_2FA_CODE) {
+        return NextResponse.json({ error: "Admin 2FA is not configured." }, { status: 503 });
+      }
+      const providedOtp = typeof adminOtp === "string" ? adminOtp.trim() : "";
+      if (!providedOtp) {
+        return NextResponse.json(
+          { message: "Admin 2FA code required.", requiresAdminOtp: true, email: user.email },
+          { status: 202 }
+        );
+      }
+      if (providedOtp !== ADMIN_2FA_CODE) {
+        recordFailedAttempt(normalizedEmail);
+        return NextResponse.json({ error: "Invalid admin 2FA code." }, { status: 401 });
+      }
+    }
+
+    if (!isEmailVerificationRequired() && user.subscription?.plan === "free" && (user.subscription?.status !== "active" || !user.emailVerifiedAt)) {
+      await prisma.$transaction([
+        prisma.user.update({
+          where: { id: user.id },
+          data: { emailVerifiedAt: user.emailVerifiedAt || new Date() },
+        }),
+        prisma.subscription.updateMany({
+          where: { userId: user.id, plan: "free", status: "inactive" },
+          data: { status: "active" },
+        }),
+      ]);
+      user = {
+        ...user,
+        emailVerifiedAt: user.emailVerifiedAt || new Date(),
+        subscription: {
+          ...user.subscription,
+          status: "active",
+        },
+      };
+    }
+
+    let subscription = user.subscription;
+    subscription = await expireSubscriptionIfNeeded(subscription);
 
     // Sign JWT
     const token = signToken({ userId: user.id, email: user.email, role: user.role, tokenVersion: user.tokenVersion });

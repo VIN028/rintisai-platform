@@ -29,12 +29,18 @@ model User {
   conversations  Conversation[]
   apiKeys        ApiKey[]
   upgradeRequests UpgradeRequest[]
+  apiCreditLedger ApiCreditLedger[]
+  cashoutRequests CashoutRequest[]
 }
 
 model ApiKey {
   id        String   @id @default(uuid())
   key       String   @unique
+  encryptedKey String?
   name      String   @default("VS Code Key")
+  providerScope String @default("all") // all legacy | codex | claude | grok
+  quotaUsdMicros Int @default(0) // 0 = unlimited, monthly cap otherwise
+  status    String   @default("active") // active | disabled
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
@@ -45,12 +51,15 @@ model Subscription {
   userId            String   @unique
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   plan              String   @default("starter") // starter | pro | developer
+  billingInterval   String   @default("monthly") // weekly | monthly
   status            String   @default("inactive") // active | inactive | expired | cancelled | suspended
   expiryDate        DateTime
   apiAccessEnabled  Boolean  @default(false)
   customLimit5h     Int?
   customLimitWeekly Int?
   customLimitMonthly Int?
+  apiCreditBalanceRp Int @default(0)
+  apiCreditBalanceUsdMicros Int @default(0)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }
@@ -66,6 +75,26 @@ model TokenUsage {
   totalTokens      Int
   source           String   @default("web") // web | api
   apiKeyId         String?
+  providerPool     String?
+  fallbackUsed     Boolean  @default(false)
+}
+
+model ApiCreditLedger {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type             String   // topup | usage | refund | adjustment
+  amountRp         Int
+  amountUsdMicros  Int      @default(0)
+  fxRate           Int?
+  modelUsed        String?
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  apiKeyId         String?
+  providerPool     String?
+  fallbackUsed     Boolean  @default(false)
+  note             String?
+  createdAt        DateTime @default(now())
 }
 
 model Conversation {
@@ -93,6 +122,7 @@ model UpgradeRequest {
   userId        String
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   plan          String   // starter | pro | developer
+  billingInterval String @default("monthly") // weekly | monthly
   paymentMethod String   // gopay | ovo | dana | bank | crypto
   paymentRef    String?  // user's payment reference / phone number
   paymentProof  String?  // base64 proof image
@@ -100,7 +130,33 @@ model UpgradeRequest {
   transferAmount Int?    // exact amount user should transfer
   status        String   @default("pending") // pending | confirmed | completed | rejected
   note          String?
+  adminActionBy String?
+  adminActionAt DateTime?
+  confirmedAt   DateTime?
+  completedAt   DateTime?
+  rejectedAt    DateTime?
   createdAt     DateTime @default(now())
+}
+
+model CashoutRequest {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amountUsdMicros Int
+  amountRp        Int
+  feeRp           Int      @default(0)
+  payoutAmountRp  Int      @default(0)
+  fxRate          Int
+  payoutMethod    String
+  payoutRef       String?
+  status          String   @default("pending") // pending | confirmed | completed | rejected
+  reason          String?
+  adminActionBy   String?
+  adminActionAt   DateTime?
+  confirmedAt     DateTime?
+  completedAt     DateTime?
+  rejectedAt      DateTime?
+  createdAt       DateTime @default(now())
 }
 
 model Setting {

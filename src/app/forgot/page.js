@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Mail, ArrowRight, RefreshCw } from "lucide-react";
+import { clearFieldValidity, handleFormInvalid } from "@/lib/form-validation";
 
 export default function ForgotPage() {
   const [email, setEmail] = useState("");
@@ -13,11 +14,18 @@ export default function ForgotPage() {
 
   const submitCode = async () => {
     setError("");
+    if (!email.trim()) {
+      setError("Email is required.");
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch("/api/auth/forgot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Something went wrong.");
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem("rintisai:resetEmail", email.trim().toLowerCase());
+      }
       setSent(true);
       setCooldown(60);
       const timer = setInterval(() => setCooldown((c) => { if (c <= 1) { clearInterval(timer); return 0; } return c - 1; }), 1000);
@@ -55,17 +63,17 @@ export default function ForgotPage() {
               {cooldown > 0 ? `Resend available in ${cooldown}s` : "Resend Code"}
             </button>
 
-            <Link href="/reset" className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl text-sm transition text-center flex items-center justify-center gap-2" style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"0.5rem"}}>
+            <Link href={`/reset?email=${encodeURIComponent(email.trim().toLowerCase())}`} className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl text-sm transition text-center flex items-center justify-center gap-2" style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"0.5rem"}}>
               Go to Reset Page <ArrowRight size={16} />
             </Link>
           </div>
         ) : (
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} noValidate onInvalid={handleFormInvalid} onInput={clearFieldValidity}>
             <div className="form-group">
               <label className="form-label">Email</label>
               <div className="input-container">
                 <div className="input-icon"><Mail size={18} /></div>
-                <input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="name@email.com" className="auth-input" />
+                <input type="email" required data-label="Email" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@email.com" className="auth-input" />
               </div>
             </div>
             <button type="submit" disabled={loading} className="auth-btn">{loading ? "Sending..." : "Send Reset Code"}</button>

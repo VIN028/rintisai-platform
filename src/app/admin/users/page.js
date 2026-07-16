@@ -23,6 +23,7 @@ function Skeleton() {
 const filters = [
   { key: "all", label: "All" },
   { key: "active", label: "Active" },
+  { key: "not_verified", label: "Not Verified" },
   { key: "inactive", label: "Inactive" },
   { key: "suspended", label: "Suspended" },
   { key: "developer", label: "Developer" },
@@ -54,6 +55,7 @@ export default function AdminUsersPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (filter === "all") { setUsers(allUsers); return; }
     if (filter === "active") { setUsers(allUsers.filter((u) => u.subscription?.status === "active")); return; }
+    if (filter === "not_verified") { setUsers(allUsers.filter((u) => !u.emailVerifiedAt)); return; }
     if (filter === "inactive") { setUsers(allUsers.filter((u) => u.subscription?.status === "inactive")); return; }
     if (filter === "suspended") { setUsers(allUsers.filter((u) => u.subscription?.status === "suspended")); return; }
     if (filter === "developer") { setUsers(allUsers.filter((u) => u.subscription?.plan === "developer")); return; }
@@ -155,6 +157,11 @@ export default function AdminUsersPage() {
                   <span className={`text-[10px] px-2 py-0.5 rounded-full capitalize ${user.subscription?.status === "active" ? "bg-emerald-500/10 text-emerald-300" : "bg-white/5 text-gray-400"}`}>
                     {user.subscription?.status}
                   </span>
+                  {!user.emailVerifiedAt && (
+                    <span className="ml-2 inline-block text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300">
+                      Not Verified
+                    </span>
+                  )}
                 </td>
                 <td className="p-3 text-right font-mono text-gray-400">{user.apiKeyCount}</td>
                 <td className="p-3 text-right">

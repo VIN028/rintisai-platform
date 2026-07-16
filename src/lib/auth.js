@@ -1,6 +1,8 @@
 import jwt from "jsonwebtoken";
 import prisma from "@/lib/db";
 import crypto from "crypto";
+import { isEmailConfigured } from "@/lib/email";
+import { expireSubscriptionIfNeeded } from "@/lib/subscription-expiry";
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -27,16 +29,17 @@ export function verifyToken(token) {
 }
 
 export function isEmailVerificationRequired() {
-  return process.env.REQUIRE_EMAIL_VERIFICATION === "true";
+  return process.env.REQUIRE_EMAIL_VERIFICATION === "strict" && isEmailConfigured();
 }
 
-export function createVerificationToken() {
-  const token = crypto.randomBytes(32).toString("hex");
-  return { token, hash: hashVerificationToken(token) };
+export function createVerificationToken(email = "") {
+  const token = String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
+  return { token, hash: hashVerificationToken(token, email) };
 }
 
-export function hashVerificationToken(token) {
-  return crypto.createHash("sha256").update(token).digest("hex");
+export function hashVerificationToken(token, email = "") {
+  const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+  return crypto.createHash("sha256").update(`${normalizedEmail}:${token}`).digest("hex");
 }
 
 export async function authenticateUser(req, { requireActive = false } = {}) {
@@ -59,6 +62,10 @@ export async function authenticateUser(req, { requireActive = false } = {}) {
 
   if (decoded.tokenVersion !== undefined && decoded.tokenVersion !== user.tokenVersion) {
     throw new AuthError("Session expired — please sign in again", 401);
+  }
+
+  if (user.subscription) {
+    user.subscription = await expireSubscriptionIfNeeded(user.subscription);
   }
 
   if (requireActive) {

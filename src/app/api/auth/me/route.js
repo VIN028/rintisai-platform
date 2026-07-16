@@ -1,55 +1,35 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
-import { authenticateUser, AuthError } from "@/lib/auth";
-
-// Plan Limits config mapping
-export const PLAN_LIMITS = {
-  free: {
-    rolling5h: 20000,
-    weekly: 100000,
-    monthly: 300000,
-  },
-  student: {
-    rolling5h: 1500000,
-    weekly: 8000000,
-    monthly: 25000000,
-  },
-  starter: {
-    rolling5h: 2500000,
-    weekly: 10000000,
-    monthly: 35000000,
-  },
-  pro: {
-    rolling5h: 6000000,
-    weekly: 25000000,
-    monthly: 60000000,
-  },
-  developer: {
-    rolling5h: 14000000,
-    weekly: 55000000,
-    monthly: 150000000,
-  },
-  inactive: {
-    rolling5h: 0,
-    weekly: 0,
-    monthly: 0,
-  },
-};
+import { authenticateUser, AuthError, isEmailVerificationRequired } from "@/lib/auth";
+import { calculateClaudeOfficialCostUsdMicros, getManagedUsdIdrRate, idrToUsdMicros, isClaudeApiPlan, usdMicrosToIdr } from "@/lib/claude-payg";
+import { getPlanDefinition, getPlanLimit, getUsageWindowConfig, getUsageWindowStart, normalizeBillingInterval } from "@/lib/plans";
+import { buildEntitlementUsageWindows, getUserEntitlements } from "@/lib/entitlements";
+import { expireSubscriptionIfNeeded } from "@/lib/subscription-expiry";
 
 export function getActivePlan(subscription) {
-  if (!subscription || subscription.status !== "active") return "inactive";
+  if (!subscription) return "free";
+  if (subscription?.plan === "free" && !isEmailVerificationRequired()) return "free";
+  if (subscription.status !== "active") return "inactive";
   if (subscription.expiryDate && new Date() > new Date(subscription.expiryDate)) return "inactive";
-  return PLAN_LIMITS[subscription.plan] ? subscription.plan : "inactive";
+  return getPlanDefinition(subscription.plan) ? subscription.plan : "inactive";
 }
 
 export function getEffectiveLimits(subscription) {
   const activePlan = getActivePlan(subscription);
-  const base = PLAN_LIMITS[activePlan] || PLAN_LIMITS.inactive;
+  const interval = normalizeBillingInterval(subscription?.billingInterval);
+  const window = getUsageWindowConfig(interval);
+  const limit = getPlanLimit(activePlan, interval, subscription);
 
   return {
-    rolling5h: subscription?.customLimit5h ?? base.rolling5h,
-    weekly: subscription?.customLimitWeekly ?? base.weekly,
-    monthly: subscription?.customLimitMonthly ?? base.monthly,
+    billingInterval: interval,
+    windowKey: window.key,
+    windowLabel: window.label,
+    windowMs: window.ms,
+    windowStart: getUsageWindowStart(subscription, { windowMs: window.ms }),
+    limit,
+    threeDay: interval === "3day" ? limit : null,
+    weekly: interval === "weekly" ? limit : null,
+    monthly: interval === "monthly" ? limit : null,
   };
 }
 
@@ -65,81 +45,94 @@ function toUsageWindow(key, label, used, limit, resetAt) {
     status = "Nearly full";
   }
 
-  return { key, label, percent, status, resetAt };
+  return { key, label, used, limit, percent, status, resetAt };
 }
 
 export async function GET(req) {
   try {
-    const user = await authenticateUser(req);
+    let user = await authenticateUser(req);
     const userId = user.id;
 
     // Check if subscription has expired
     let subscription = user.subscription;
-    if (subscription && new Date() > new Date(subscription.expiryDate) && subscription.status === "active") {
-      subscription = await prisma.subscription.update({
-        where: { id: subscription.id },
-        data: { status: "expired" },
-      });
+    subscription = await expireSubscriptionIfNeeded(subscription);
+
+    if (!isEmailVerificationRequired() && subscription?.plan === "free" && (subscription.status !== "active" || !user.emailVerifiedAt)) {
+      const verifiedAt = user.emailVerifiedAt || new Date();
+      await prisma.$transaction([
+        prisma.user.update({ where: { id: user.id }, data: { emailVerifiedAt: verifiedAt } }),
+        prisma.subscription.updateMany({ where: { userId, plan: "free", status: "inactive" }, data: { status: "active" } }),
+      ]);
+      user = { ...user, emailVerifiedAt: verifiedAt };
+      subscription = { ...subscription, status: "active" };
     }
 
     const plan = getActivePlan(subscription);
     const limits = getEffectiveLimits(subscription);
 
-    // Calculate rolling token usages
     const now = new Date();
-    const fiveHoursAgo = new Date(now.getTime() - 5 * 60 * 60 * 1000);
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const monthlyWindowMs = getUsageWindowConfig("monthly").ms;
+    const planWindowStart = limits.windowStart ? new Date(limits.windowStart) : getUsageWindowStart(subscription, limits, now);
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-    // Run aggregations in DB
-    const [usage5h, usage7d, usage30d] = await Promise.all([
+    const [planUsage] = await Promise.all([
       prisma.tokenUsage.aggregate({
-        where: { userId, timestamp: { gte: fiveHoursAgo } },
-        _sum: { totalTokens: true },
-      }),
-      prisma.tokenUsage.aggregate({
-        where: { userId, timestamp: { gte: sevenDaysAgo } },
-        _sum: { totalTokens: true },
-      }),
-      prisma.tokenUsage.aggregate({
-        where: { userId, timestamp: { gte: thirtyDaysAgo } },
+        where: { userId, timestamp: { gte: planWindowStart } },
         _sum: { totalTokens: true },
       }),
     ]);
 
-    const total5h = usage5h._sum.totalTokens || 0;
-    const total7d = usage7d._sum.totalTokens || 0;
-    const total30d = usage30d._sum.totalTokens || 0;
+    const totalPlanUsage = planUsage._sum.totalTokens || 0;
+    const entitlements = await getUserEntitlements(userId, subscription);
+    const packageSummaries = await buildEntitlementUsageWindows({ userId, entitlements });
+    const activePackageWindows = packageSummaries.filter((item) => item.status !== "Queued");
+    const usdIdrRate = await getManagedUsdIdrRate();
+    const apiCreditBalanceUsdMicros = (subscription?.apiCreditBalanceUsdMicros || 0) + idrToUsdMicros(subscription?.apiCreditBalanceRp || 0, usdIdrRate);
+    const apiCreditLedger = await prisma.apiCreditLedger.findMany({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      }).catch(() => []);
+    const apiUsageRows = await prisma.apiCreditLedger.findMany({
+        where: { userId, type: "usage", createdAt: { gte: thirtyDaysAgo } },
+        orderBy: { createdAt: "desc" },
+        take: 1000,
+      }).catch(() => []);
+    const cashoutRequests = await prisma.cashoutRequest.findMany({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+      }).catch(() => []);
+    const apiKeyCount = await prisma.apiKey.count({ where: { userId } }).catch(() => 0);
+    const hasApiWorkspace = subscription?.apiAccessEnabled === true || isClaudeApiPlan(subscription?.plan) || apiCreditBalanceUsdMicros > 0 || apiCreditLedger.length > 0 || apiKeyCount > 0;
+    const publicApiCreditLedger = apiCreditLedger.map(({ providerPool, fallbackUsed, ...entry }) => entry);
+    const apiModelMap = new Map();
+    let apiInputTokens = 0;
+    let apiOutputTokens = 0;
+    let apiActualUsdMicros = 0;
+    let apiStandardUsdMicros = 0;
+    for (const row of apiUsageRows) {
+      const model = row.modelUsed || "unknown";
+      const input = row.promptTokens || 0;
+      const output = row.completionTokens || 0;
+      const actual = Math.abs(row.amountUsdMicros || 0);
+      const standard = calculateClaudeOfficialCostUsdMicros({ model, promptTokens: input, completionTokens: output });
+      apiInputTokens += input;
+      apiOutputTokens += output;
+      apiActualUsdMicros += actual;
+      apiStandardUsdMicros += standard;
+      const current = apiModelMap.get(model) || { model, requests: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, actualUsdMicros: 0, standardUsdMicros: 0 };
+      current.requests += 1;
+      current.inputTokens += input;
+      current.outputTokens += output;
+      current.totalTokens += input + output;
+      current.actualUsdMicros += actual;
+      current.standardUsdMicros += standard;
+      apiModelMap.set(model, current);
+    }
 
-    // Find oldest transaction in 5 hours window to calculate next reset
-    const oldest5hRecord = await prisma.tokenUsage.findFirst({
-      where: { userId, timestamp: { gte: fiveHoursAgo } },
-      orderBy: { timestamp: "asc" },
-      select: { timestamp: true },
-    });
-    const nextReset5h = oldest5hRecord
-      ? new Date(oldest5hRecord.timestamp.getTime() + 5 * 60 * 60 * 1000).toISOString()
-      : null;
-
-    // Find oldest transaction in 7 days window to calculate next reset
-    const oldest7dRecord = await prisma.tokenUsage.findFirst({
-      where: { userId, timestamp: { gte: sevenDaysAgo } },
-      orderBy: { timestamp: "asc" },
-      select: { timestamp: true },
-    });
-    const nextReset7d = oldest7dRecord
-      ? new Date(oldest7dRecord.timestamp.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
-      : null;
-
-    // Monthly reset: rolling 30-day window (oldest txn + 30 days, or now + 30 days)
-    const oldest30dRecord = await prisma.tokenUsage.findFirst({
-      where: { userId, timestamp: { gte: thirtyDaysAgo } },
-      orderBy: { timestamp: "asc" },
-      select: { timestamp: true },
-    });
-    const nextResetMonthly = oldest30dRecord
-      ? new Date(oldest30dRecord.timestamp.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString()
-      : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    const nextPlanReset = new Date(planWindowStart.getTime() + (limits.windowMs || monthlyWindowMs)).toISOString();
+    const fallbackUsageWindow = toUsageWindow(limits.windowKey || "monthly", limits.windowLabel || "Monthly", totalPlanUsage, limits.limit, nextPlanReset);
 
     return NextResponse.json({
       user: {
@@ -152,11 +145,26 @@ export async function GET(req) {
       subscription,
       plan,
       usage: {
-        windows: [
-          toUsageWindow("5h", "Active session", total5h, limits.rolling5h, nextReset5h),
-          toUsageWindow("weekly", "Weekly", total7d, limits.weekly, nextReset7d),
-          toUsageWindow("monthly", "Monthly", total30d, limits.monthly, nextResetMonthly),
-        ],
+        windows: activePackageWindows.length > 0 ? activePackageWindows : [fallbackUsageWindow],
+        packages: packageSummaries,
+        apiCreditBalanceRp: usdMicrosToIdr(apiCreditBalanceUsdMicros, usdIdrRate),
+        apiCreditBalanceUsdMicros,
+        apiCreditBalanceUsd: apiCreditBalanceUsdMicros / 1_000_000,
+        usdIdrRate,
+        apiCreditLedger: publicApiCreditLedger,
+        cashoutRequests,
+        hasApiWorkspace,
+        apiKeyCount,
+        apiUsageSummary: {
+          range: "Last 30 Days",
+          totalRequests: apiUsageRows.length,
+          inputTokens: apiInputTokens,
+          outputTokens: apiOutputTokens,
+          totalTokens: apiInputTokens + apiOutputTokens,
+          actualUsdMicros: apiActualUsdMicros,
+          standardUsdMicros: apiStandardUsdMicros,
+          modelDistribution: Array.from(apiModelMap.values()).sort((a, b) => b.actualUsdMicros - a.actualUsdMicros),
+        },
       },
     });
   } catch (error) {

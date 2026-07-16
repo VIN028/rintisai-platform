@@ -52,9 +52,10 @@ export default function TermsPage() {
           <section>
             <h2 className="text-lg font-bold text-white mb-3">5. Plans & Payments</h2>
             <ul className="list-disc pl-5 space-y-1">
-              <li>Plans are subscription-based with monthly limits on usage</li>
+              <li>Plans are subscription-based with 3-day, weekly, or monthly limits on usage</li>
               <li>Payment is processed manually via GoPay, OVO, bank transfer, or cryptocurrency</li>
               <li>Upgrades and top-ups are processed by admin review (typically 1-24 hours)</li>
+              <li>Claude API PAYG balance can be cashed out only by manual request to admin and after account/payment review, with a minimum cash-out amount of $1.00 and only one active request at a time</li>
               <li>All payments are final and non-refundable unless otherwise agreed</li>
               <li>We reserve the right to modify plan pricing with notice</li>
             </ul>

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { authenticateUser, AuthError, createVerificationToken } from "@/lib/auth";
-import { sendEmail, verifyEmail } from "@/lib/email";
+import { isEmailConfigured, sendEmail, verifyEmailCode } from "@/lib/email";
 
 const resendMap = new Map();
 
@@ -16,16 +16,34 @@ function canResend(userId) {
 
 export async function POST(req) {
   try {
-    const user = await authenticateUser(req);
+    if (!isEmailConfigured()) {
+      return NextResponse.json({ error: "Email verification is temporarily unavailable." }, { status: 503 });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const requestedEmail = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+
+    let user = null;
+    try {
+      user = await authenticateUser(req);
+    } catch {
+      if (requestedEmail) {
+        user = await prisma.user.findUnique({ where: { email: requestedEmail } });
+      }
+    }
+
+    if (!user) {
+      return NextResponse.json({ message: "If this email can be verified, a new code has been sent." });
+    }
 
     if (user.emailVerifiedAt) {
       return NextResponse.json({ message: "Email already verified." });
     }
-    if (!canResend(user.id)) {
+    if (!canResend(user.id || user.email)) {
       return NextResponse.json({ error: "Too many verification emails. Try again later." }, { status: 429 });
     }
 
-    const { token, hash } = createVerificationToken();
+    const { token, hash } = createVerificationToken(user.email);
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -34,8 +52,8 @@ export async function POST(req) {
       },
     });
 
-    await sendEmail({ to: user.email, ...verifyEmail(token) });
-    return NextResponse.json({ message: "Verification email sent." });
+    await sendEmail({ to: user.email, ...verifyEmailCode(token, user.email) });
+    return NextResponse.json({ message: "Verification code sent." });
   } catch (err) {
     const status = err instanceof AuthError ? err.status : 500;
     return NextResponse.json({ error: err.message }, { status });

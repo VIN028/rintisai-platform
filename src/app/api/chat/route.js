@@ -2,10 +2,62 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { authenticateUser, AuthError, requireVerifiedEmail } from "@/lib/auth";
 import { getActivePlan, getEffectiveLimits } from "../auth/me/route";
-import { cancelUsageReservation, estimateUsageUnits, finalizeUsageReservation, reserveUsage } from "@/lib/quota";
+import { cancelUsageReservation, estimateUsageUnits, finalizeUsageReservation, getBillableReasoningEffort, reserveUsage } from "@/lib/quota";
 import { estimateTokens } from "@/lib/security";
-import { ALLOWED_MODELS, getMaxContextTokens, getMaxOutputTokens, getResellerConfig, isModelAllowedForPlan, normalizeReasoningEffort, toUpstreamReasoningEffort } from "@/lib/models";
-import { compactMessagesForContext, contentToText, sanitizeAssistantContent } from "@/lib/context";
+import { ALLOWED_MODELS, getMaxContextTokens, getMaxOutputTokens, getResellerConfig, isModelAllowedForPlan, normalizeReasoningEffort, supportsVisionInput, toUpstreamReasoningEffort } from "@/lib/models";
+import { buildChatSystemPrompt, compactMessagesForContext, contentToText, sanitizeAssistantContent } from "@/lib/context";
+import { appendTextToContent, fetchUrlContextsFromText, formatFetchedUrlContext } from "@/lib/url-fetch";
+import { toAnthropicContent } from "@/lib/multimodal";
+import { isApiPlan } from "@/lib/plans";
+import { resolveEntitlementForModel } from "@/lib/entitlements";
+import { expireSubscriptionIfNeeded } from "@/lib/subscription-expiry";
+
+const UPSTREAM_ATTEMPT_TIMEOUT_MS = 25_000;
+const MIN_COMPLETION_TOKENS = 512;
+const CHAT_TOOL_DEFINITIONS = {
+  file_search: { label: "File Search", description: "Search and use attached or project file context when available." },
+  web_search: { label: "Web Search", description: "Search the web for current information when the provider supports it." },
+  skills: { label: "Skills", description: "Use structured skills and task-specific procedures when helpful." },
+  run_code: { label: "Run Code", description: "Run or reason through code execution when a code interpreter is available." },
+  artifacts: { label: "Artifacts", description: "Create file/artifact style outputs when the user asks for deliverables." },
+};
+
+function normalizeEnabledTools(value) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((key) => Object.prototype.hasOwnProperty.call(CHAT_TOOL_DEFINITIONS, key));
+}
+
+function buildToolInstructions(enabledTools, attachmentMode) {
+  const lines = enabledTools.map((key) => `- ${CHAT_TOOL_DEFINITIONS[key].label}: ${CHAT_TOOL_DEFINITIONS[key].description}`);
+  if (attachmentMode === "provider") lines.push("- Attachment upload mode: prefer native provider/file-search handling when available; otherwise use extracted text context already included in the prompt.");
+  if (lines.length === 0) return "";
+  return `Enabled tool preferences for this request:\n${lines.join("\n")}\nIf a native tool is not available in this environment, continue with the available context and say what could not be executed.`;
+}
+
+function toOpenAiToolDefinitions(enabledTools) {
+  return enabledTools.map((key) => ({
+    type: "function",
+    function: {
+      name: key,
+      description: CHAT_TOOL_DEFINITIONS[key].description,
+      parameters: { type: "object", properties: { query: { type: "string" } } },
+    },
+  }));
+}
+
+function toAnthropicToolDefinitions(enabledTools) {
+  return enabledTools.map((key) => ({
+    name: key,
+    description: CHAT_TOOL_DEFINITIONS[key].description,
+    input_schema: { type: "object", properties: { query: { type: "string" } } },
+  }));
+}
+
+function fitCompletionTokensToContext({ promptTokens, maxTokens, maxContextTokens }) {
+  const available = Math.max(0, Number(maxContextTokens || 0) - Number(promptTokens || 0));
+  if (available < MIN_COMPLETION_TOKENS) return { error: true, available };
+  return { maxTokens: Math.min(maxTokens, available), available };
+}
 
 export async function POST(req) {
   try {
@@ -14,7 +66,9 @@ export async function POST(req) {
     const userId = user.id;
 
     // Parse request
-    const { messages, model, conversationId, reasoning_effort, userContent } = await req.json();
+    const { messages, model, conversationId, reasoning_effort, userContent, enabledTools: enabledToolsRaw, attachmentMode } = await req.json();
+    const enabledTools = normalizeEnabledTools(enabledToolsRaw);
+    const toolInstructions = buildToolInstructions(enabledTools, attachmentMode);
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json({ error: "Chat messages are required." }, { status: 400 });
     }
@@ -26,17 +80,14 @@ export async function POST(req) {
     if (!ALLOWED_MODELS.has(selectedModel)) {
       return NextResponse.json({ error: "Selected model is not available." }, { status: 400 });
     }
+    if (Array.isArray(userContent) && userContent.some((part) => part?.type === "image_url") && !supportsVisionInput(selectedModel)) {
+      return NextResponse.json({ error: "Image understanding is not available for this model yet. Use text prompts for now." }, { status: 400 });
+    }
     const requestedReasoningEffort = normalizeReasoningEffort(reasoning_effort);
     const upstreamReasoningEffort = toUpstreamReasoningEffort(requestedReasoningEffort);
 
-    // Check if subscription has expired
     let subscription = user.subscription;
-    if (subscription && new Date() > new Date(subscription.expiryDate) && subscription.status === "active") {
-      subscription = await prisma.subscription.update({
-        where: { id: subscription.id },
-        data: { status: "expired" },
-      });
-    }
+    subscription = await expireSubscriptionIfNeeded(subscription);
 
     const plan = getActivePlan(subscription);
 
@@ -44,17 +95,28 @@ export async function POST(req) {
       return NextResponse.json({ error: "Akses AI belum aktif. Silakan upgrade paket atau hubungi admin." }, { status: 403 });
     }
 
-    if (!isModelAllowedForPlan(selectedModel, plan)) {
+    const entitlementAccess = await resolveEntitlementForModel({ userId, subscription, model: selectedModel, fallbackPlan: plan });
+    const webPlan = isApiPlan(plan) ? "free" : entitlementAccess.plan;
+
+    if (!isModelAllowedForPlan(selectedModel, webPlan)) {
       return NextResponse.json({ error: "This model requires a higher plan. Please upgrade." }, { status: 403 });
     }
 
-    const maxOutputTokens = getMaxOutputTokens(selectedModel, plan);
-    const maxContextTokens = getMaxContextTokens(selectedModel, plan);
+    let maxOutputTokens = getMaxOutputTokens(selectedModel, webPlan);
+    const maxContextTokens = getMaxContextTokens(selectedModel, webPlan);
     if (maxOutputTokens <= 0) {
       return NextResponse.json({ error: "This model is not available for your plan." }, { status: 403 });
     }
 
-    const limits = getEffectiveLimits(subscription);
+    const limits = entitlementAccess.limits || (isApiPlan(plan)
+      ? getEffectiveLimits({ plan: "free", status: "active", billingInterval: "monthly" })
+      : getEffectiveLimits(subscription));
+    const billableReasoningEffort = getBillableReasoningEffort({
+      model: selectedModel,
+      plan: webPlan,
+      source: "web",
+      requestedReasoningEffort,
+    });
 
     // Retrieve or Create Conversation
     let activeConversationId = conversationId;
@@ -63,9 +125,15 @@ export async function POST(req) {
     const userPrompt = isMultimodal
       ? userContent.filter((part) => part.type === "text").map((part) => part.text).join(" ") || "Attached image"
       : (typeof lastMessage.content === "string" ? lastMessage.content : JSON.stringify(lastMessage.content));
-    if (userPrompt.length > 50_000 || (isMultimodal && JSON.stringify(userContent).length > 1_000_000)) {
+    const maxPromptChars = Math.max(60_000, Math.min(2_000_000, maxContextTokens * 4));
+    if (userPrompt.length > maxPromptChars || (isMultimodal && JSON.stringify(userContent).length > Math.max(1_000_000, maxPromptChars * 1.2))) {
       return NextResponse.json({ error: "Chat request is too large." }, { status: 400 });
     }
+    const fetchedUrlContexts = await fetchUrlContextsFromText(userPrompt);
+    const fetchedUrlText = formatFetchedUrlContext(fetchedUrlContexts);
+    const fetchedUrlPrompt = fetchedUrlText
+      ? `The user asked about external URL content. Use this fetched web context when answering. If a fetch error is shown, be transparent and continue with available information.\n\n${fetchedUrlText}`
+      : "";
 
     if (activeConversationId) {
       const existingConversation = await prisma.conversation.findFirst({
@@ -88,9 +156,11 @@ export async function POST(req) {
     }
 
     const userPromptTokens = estimateTokens(userPrompt);
-    if (userPromptTokens + maxOutputTokens > maxContextTokens) {
-      return NextResponse.json({ error: "Request exceeds your plan context limit. Upgrade for a larger context window." }, { status: 400 });
+    const fittedUserCompletion = fitCompletionTokensToContext({ promptTokens: userPromptTokens, maxTokens: maxOutputTokens, maxContextTokens });
+    if (fittedUserCompletion.error) {
+      return NextResponse.json({ error: "Request exceeds the model context limit. Start a new chat or send less context." }, { status: 400 });
     }
+    maxOutputTokens = fittedUserCompletion.maxTokens;
 
     const persistedMessages = await prisma.message.findMany({
       where: { conversationId: activeConversationId },
@@ -99,44 +169,54 @@ export async function POST(req) {
     });
     const incomingUserMessage = {
       role: "user",
-      content: isMultimodal ? userContent : lastMessage.content,
+      content: appendTextToContent(isMultimodal ? userContent : lastMessage.content, fetchedUrlPrompt),
     };
-    const conversationMessages = [...persistedMessages, incomingUserMessage];
+    const lastPersistedMessage = persistedMessages[persistedMessages.length - 1];
+    const isInterruptedRetry = lastPersistedMessage?.role === "user" && lastPersistedMessage?.content === userPrompt;
+    const conversationMessages = isInterruptedRetry
+      ? [...persistedMessages.slice(0, -1), incomingUserMessage]
+      : [...persistedMessages, incomingUserMessage];
     const contextPlan = compactMessagesForContext({
       messages: conversationMessages,
       maxContextTokens,
       maxOutputTokens,
+      systemPrompt: [buildChatSystemPrompt(selectedModel, userPrompt), toolInstructions].filter(Boolean).join("\n\n"),
     });
-    if (contextPlan.promptTokens + maxOutputTokens > maxContextTokens) {
-      return NextResponse.json({ error: "Request is too large even after auto-compaction. Send a shorter message or upgrade for a larger context window." }, { status: 400 });
+    const fittedContextCompletion = fitCompletionTokensToContext({ promptTokens: contextPlan.promptTokens, maxTokens: maxOutputTokens, maxContextTokens });
+    if (fittedContextCompletion.error) {
+      return NextResponse.json({ error: "Request is too large even after auto-compaction. Start a new chat or send less context." }, { status: 400 });
     }
+    maxOutputTokens = fittedContextCompletion.maxTokens;
 
     const reservationResult = await reserveUsage({
       userId,
       model: selectedModel,
       source: "web",
       estimatedPromptTokens: contextPlan.promptTokens,
-      estimatedTotalTokens: estimateUsageUnits({ promptText: conversationMessages.map((message) => contentToText(message.content)).join("\n"), model: selectedModel, maxTokens: maxOutputTokens, reasoningEffort: requestedReasoningEffort }),
+      estimatedTotalTokens: estimateUsageUnits({ promptText: conversationMessages.map((message) => contentToText(message.content)).join("\n"), model: selectedModel, maxTokens: maxOutputTokens, reasoningEffort: billableReasoningEffort, plan: webPlan }),
       limits,
-      plan,
+      plan: webPlan,
+      packageId: limits.packageId || null,
     });
     if (reservationResult.error) {
       return NextResponse.json({ error: reservationResult.error }, { status: reservationResult.status });
     }
     const reservationId = reservationResult.reservation.id;
 
-    // Save user's message to DB
-    await prisma.message.create({
-      data: {
-        conversationId: activeConversationId,
-        role: "user",
-        content: userPrompt,
-      },
-    });
+    if (!isInterruptedRetry) {
+      await prisma.message.create({
+        data: {
+          conversationId: activeConversationId,
+          role: "user",
+          content: userPrompt,
+        },
+      });
+    }
 
     // Call Reseller proxy
     const reseller = getResellerConfig(selectedModel);
     const resellerBaseUrl = reseller.baseUrl;
+    const usageProviderPool = reseller.providerPool || (reseller.type === "anthropic" ? "kiro" : "plus");
     let resellerApiKey = user.assignedApiKey;
     if (!resellerApiKey || resellerApiKey.startsWith("sk-placeholder")) {
       resellerApiKey = reseller.apiKey;
@@ -159,7 +239,7 @@ export async function POST(req) {
         .filter((message) => message.role !== "system")
         .map((message) => ({
           role: message.role === "assistant" ? "assistant" : "user",
-          content: contentToText(message.content),
+          content: toAnthropicContent(message.content),
         }));
 
       const encoder = new TextEncoder();
@@ -177,70 +257,148 @@ export async function POST(req) {
             },
           })}\n\n`));
 
-          const anthropicController = new AbortController();
-          const anthropicTimeout = setTimeout(() => anthropicController.abort(), 90_000);
           try {
-            const anthropicResponse = await fetch(`${resellerBaseUrl}/messages`, {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${resellerApiKey}`,
-                "Content-Type": "application/json",
-                "anthropic-version": "2023-06-01",
-              },
-              signal: anthropicController.signal,
-              body: JSON.stringify({
-                model: reseller.upstreamModel || selectedModel,
-                system: systemPrompt || undefined,
-                messages: anthropicMessages,
-                max_tokens: maxOutputTokens,
-              }),
-            });
+            const fetchAnthropic = async ({ stream }) => {
+              const anthropicController = new AbortController();
+              const anthropicTimeout = setTimeout(() => anthropicController.abort(), UPSTREAM_ATTEMPT_TIMEOUT_MS);
+              try {
+                return await fetch(`${resellerBaseUrl}/messages`, {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${resellerApiKey}`,
+                    "Content-Type": "application/json",
+                    "anthropic-version": "2023-06-01",
+                  },
+                  signal: anthropicController.signal,
+                  body: JSON.stringify({
+                    model: reseller.upstreamModel || selectedModel,
+                    system: systemPrompt || undefined,
+                    messages: anthropicMessages,
+                    max_tokens: maxOutputTokens,
+                    tools: enabledTools.length > 0 ? toAnthropicToolDefinitions(enabledTools) : undefined,
+                    tool_choice: enabledTools.length > 0 ? { type: "auto" } : undefined,
+                    ...(stream ? { stream: true } : {}),
+                  }),
+                });
+              } finally {
+                clearTimeout(anthropicTimeout);
+              }
+            };
 
-            clearTimeout(anthropicTimeout);
+            let anthropicResponse;
+            try {
+              anthropicResponse = await fetchAnthropic({ stream: true });
+            } catch (err) {
+              console.log("Anthropic-compatible streaming request retrying once:", err?.message || err);
+              anthropicResponse = await fetchAnthropic({ stream: true });
+            }
 
             if (!anthropicResponse.ok) {
               const errText = await anthropicResponse.text();
-              console.error("Claude Gateway Error:", errText);
+              console.log("Anthropic-compatible streaming gateway retrying without stream:", errText.slice(0, 500));
+              anthropicResponse = await fetchAnthropic({ stream: false });
+            }
+
+            if (!anthropicResponse.ok) {
+              const errText = await anthropicResponse.text();
+              console.error("Anthropic-compatible gateway error:", errText);
               await cancelUsageReservation(reservationId);
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: "Model Claude sedang tidak tersedia. Coba lagi beberapa saat lagi atau gunakan model lain." })}\n\n`));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: "Current model is temporarily unavailable. Please try again later or choose another model." })}\n\n`));
               controller.enqueue(encoder.encode("data: [DONE]\n\n"));
               controller.close();
               return;
             }
 
             const anthropicContentType = anthropicResponse.headers.get("content-type") || "";
-            if (!anthropicContentType.includes("application/json")) {
+            let completionText = "";
+            let promptTokens = contextPlan.promptTokens;
+            let completionTokens = null;
+
+            if (anthropicContentType.includes("text/event-stream")) {
+              const anthropicReader = anthropicResponse.body.getReader();
+              const decoder = new TextDecoder();
+              let sseBuffer = "";
+
+              const processAnthropicEvent = (eventText) => {
+                const dataLines = eventText
+                  .split("\n")
+                  .map((line) => line.trim())
+                  .filter((line) => line.startsWith("data: "))
+                  .map((line) => line.substring(6));
+
+                for (const dataContent of dataLines) {
+                  if (dataContent === "[DONE]") return true;
+                  try {
+                    const parsed = JSON.parse(dataContent);
+                    if (parsed.message?.usage?.input_tokens) promptTokens = parsed.message.usage.input_tokens;
+                    if (parsed.usage?.input_tokens) promptTokens = parsed.usage.input_tokens;
+                    if (parsed.usage?.output_tokens) completionTokens = parsed.usage.output_tokens;
+
+                    const textDelta = parsed.delta?.text || parsed.content_block?.text || "";
+                    if (textDelta) {
+                      completionText += textDelta;
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: sanitizeAssistantContent(textDelta) })}\n\n`));
+                    }
+                  } catch {
+                    // Ignore malformed upstream events without killing the stream.
+                  }
+                }
+
+                return false;
+              };
+
+              let streamDone = false;
+              while (true) {
+                const { done, value } = await anthropicReader.read();
+                if (done) break;
+
+                sseBuffer += decoder.decode(value, { stream: true });
+                const events = sseBuffer.split("\n\n");
+                sseBuffer = events.pop() || "";
+
+                for (const eventText of events) {
+                  streamDone = processAnthropicEvent(eventText);
+                  if (streamDone) break;
+                }
+
+                if (streamDone) break;
+              }
+
+              if (!streamDone && sseBuffer.trim()) processAnthropicEvent(sseBuffer);
+              completionText = sanitizeAssistantContent(completionText.trim());
+            } else if (anthropicContentType.includes("application/json")) {
+              const data = await anthropicResponse.json();
+              promptTokens = data.usage?.input_tokens || promptTokens;
+              completionTokens = data.usage?.output_tokens || completionTokens;
+              completionText = sanitizeAssistantContent((data.content || [])
+                .map((part) => part?.text || "")
+                .join("")
+                .trim());
+              if (completionText) controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: completionText })}\n\n`));
+            } else {
               const errText = await anthropicResponse.text();
-              console.error("Claude Gateway returned non-JSON response:", errText.slice(0, 500));
+              console.error("Claude Gateway returned unsupported response:", errText.slice(0, 500));
               await cancelUsageReservation(reservationId);
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: "Gateway Claude mengembalikan respons tidak valid. Coba lagi beberapa saat lagi atau gunakan model lain." })}\n\n`));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: "Current model is temporarily unavailable. Please try again later or choose another model." })}\n\n`));
               controller.enqueue(encoder.encode("data: [DONE]\n\n"));
               controller.close();
               return;
             }
 
-            const data = await anthropicResponse.json();
-            const completionText = sanitizeAssistantContent((data.content || [])
-              .map((part) => part?.text || "")
-              .join("")
-              .trim());
             if (!completionText) {
               await cancelUsageReservation(reservationId);
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: "Model Claude tidak mengembalikan jawaban. Coba lagi beberapa saat lagi atau gunakan model lain." })}\n\n`));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: "Current model is temporarily unavailable. Please try again later or choose another model." })}\n\n`));
               controller.enqueue(encoder.encode("data: [DONE]\n\n"));
               controller.close();
               return;
             }
 
-            const promptTokens = data.usage?.input_tokens || contextPlan.promptTokens;
-            const completionTokens = data.usage?.output_tokens || estimateTokens(completionText);
-
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: completionText })}\n\n`));
+            completionTokens = completionTokens || estimateTokens(completionText);
             controller.enqueue(encoder.encode("data: [DONE]\n\n"));
 
             try {
               await prisma.$transaction([
-                finalizeUsageReservation({ reservationId, promptTokens, completionTokens, model: selectedModel, reasoningEffort: requestedReasoningEffort }),
+                finalizeUsageReservation({ reservationId, promptTokens, completionTokens, model: selectedModel, reasoningEffort: billableReasoningEffort, providerPool: usageProviderPool, fallbackUsed: false, plan: webPlan }),
                 prisma.message.create({
                   data: {
                     conversationId: activeConversationId,
@@ -257,14 +415,16 @@ export async function POST(req) {
               console.error("Failed to save Claude response:", dbErr);
             }
           } catch (err) {
-            clearTimeout(anthropicTimeout);
+            if (err?.code === "ERR_INVALID_STATE") return;
             console.error("Claude request failed:", err);
             await cancelUsageReservation(reservationId);
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: "Model Claude timeout atau sedang tidak tersedia. Coba lagi beberapa saat lagi atau gunakan model lain." })}\n\n`));
-            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            try {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: "Current model is temporarily unavailable. Please try again later or choose another model." })}\n\n`));
+              controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            } catch {}
           }
 
-          controller.close();
+          try { controller.close(); } catch {}
         },
       });
 
@@ -283,12 +443,14 @@ export async function POST(req) {
       max_tokens: maxOutputTokens,
       stream: true,
       stream_options: { include_usage: true },
-      ...(["pro", "developer"].includes(plan) && upstreamReasoningEffort ? { reasoning_effort: upstreamReasoningEffort } : {}),
+      tools: enabledTools.length > 0 ? toOpenAiToolDefinitions(enabledTools) : undefined,
+      tool_choice: enabledTools.length > 0 ? "auto" : undefined,
+      ...(["pro", "developer", "gpt_code", "codex_pro"].includes(webPlan) && upstreamReasoningEffort ? { reasoning_effort: upstreamReasoningEffort } : {}),
     };
 
     const fetchWithKey = async (key) => {
       const attemptController = new AbortController();
-      const attemptTimeout = setTimeout(() => attemptController.abort(), 90_000);
+      const attemptTimeout = setTimeout(() => attemptController.abort(), UPSTREAM_ATTEMPT_TIMEOUT_MS);
       try {
         return await fetch(`${resellerBaseUrl}/chat/completions`, {
           method: "POST",
@@ -305,12 +467,17 @@ export async function POST(req) {
     };
 
     let apiResponse;
+    let providerPool = usageProviderPool;
+    let fallbackUsed = false;
+    let usageModel = selectedModel;
     try {
       apiResponse = await fetchWithKey(resellerApiKey);
     } catch (err) {
       if (err.name === "AbortError" && reseller.fallbackApiKey) {
         try {
           apiResponse = await fetchWithKey(reseller.fallbackApiKey);
+          providerPool = "pro";
+          fallbackUsed = true;
         } catch (fallbackErr) {
           await cancelUsageReservation(reservationId);
           return NextResponse.json(
@@ -329,9 +496,39 @@ export async function POST(req) {
       console.error("Primary reseller gateway failed; retrying fallback:", errText);
       try {
         apiResponse = await fetchWithKey(reseller.fallbackApiKey);
+        providerPool = "pro";
+        fallbackUsed = true;
       } catch (err) {
         await cancelUsageReservation(reservationId);
         return NextResponse.json({ error: err.name === "AbortError" ? "AI fallback server timed out." : "Failed to reach AI fallback server." }, { status: err.name === "AbortError" ? 504 : 502 });
+      }
+    }
+
+    if (!apiResponse.ok && reseller.fallbackModel) {
+      const errText = await apiResponse.text();
+      console.error(`${selectedModel} upstream failed; retrying with ${reseller.fallbackModel} fallback:`, errText);
+      openAiPayload.model = reseller.fallbackModel;
+      usageModel = reseller.fallbackModel;
+      fallbackUsed = true;
+      try {
+        apiResponse = await fetchWithKey(resellerApiKey);
+      } catch (err) {
+        await cancelUsageReservation(reservationId);
+        return NextResponse.json({ error: err.name === "AbortError" ? "AI fallback model timed out." : "Failed to reach AI fallback model." }, { status: err.name === "AbortError" ? 504 : 502 });
+      }
+    }
+
+    if (!apiResponse.ok && ["gpt-5.4", "gpt-5.5"].includes(selectedModel)) {
+      const errText = await apiResponse.text();
+      console.error(`${selectedModel} upstream failed; retrying with gpt-5.4-mini fallback:`, errText);
+      openAiPayload.model = "gpt-5.4-mini";
+      usageModel = "gpt-5.4-mini";
+      fallbackUsed = true;
+      try {
+        apiResponse = await fetchWithKey(resellerApiKey);
+      } catch (err) {
+        await cancelUsageReservation(reservationId);
+        return NextResponse.json({ error: err.name === "AbortError" ? "AI fallback model timed out." : "Failed to reach AI fallback model." }, { status: err.name === "AbortError" ? 504 : 502 });
       }
     }
 
@@ -350,6 +547,7 @@ export async function POST(req) {
     let actualPromptTokens = null;
     let actualCompletionTokens = null;
     let reasoningText = "";
+    let shouldPersistCompletion = true;
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -379,6 +577,10 @@ export async function POST(req) {
 
             for (const dataContent of dataLines) {
               if (dataContent === "[DONE]") {
+                if (!completionText.trim()) {
+                  shouldPersistCompletion = false;
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: "Current model returned an empty response. Please try again or choose another model." })}\n\n`));
+                }
                 controller.enqueue(encoder.encode("data: [DONE]\n\n"));
                 return true;
               }
@@ -394,9 +596,11 @@ export async function POST(req) {
                 const content = parsed.choices?.[0]?.delta?.content || "";
                 if (content) completionText += content;
 
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({ content })}\n\n`)
-                );
+                if (content) {
+                  controller.enqueue(
+                    encoder.encode(`data: ${JSON.stringify({ content })}\n\n`)
+                  );
+                }
               } catch {
                 // Ignore malformed upstream events without killing the stream.
               }
@@ -424,30 +628,34 @@ export async function POST(req) {
 
           if (!streamDone && sseBuffer.trim()) processSseEvent(sseBuffer);
         } catch (err) {
-          console.error("Error reading stream:", err);
+          if (err?.code !== "ERR_INVALID_STATE") console.error("Error reading stream:", err);
         } finally {
           const finalPromptTokens = actualPromptTokens !== null ? actualPromptTokens : contextPlan.promptTokens;
           const finalCompletionTokens = actualCompletionTokens !== null ? actualCompletionTokens : estimateTokens(completionText);
           try {
-            await prisma.$transaction([
-              finalizeUsageReservation({ reservationId, promptTokens: finalPromptTokens, completionTokens: finalCompletionTokens, model: selectedModel, reasoningEffort: requestedReasoningEffort }),
-              prisma.message.create({
-                data: {
-                  conversationId: activeConversationId,
-                  role: "assistant",
-                  content: completionText,
-                },
-              }),
-              prisma.conversation.update({
-                where: { id: activeConversationId },
-                data: { updatedAt: new Date() },
-              }),
-            ]);
+            if (shouldPersistCompletion && completionText.trim()) {
+              await prisma.$transaction([
+                finalizeUsageReservation({ reservationId, promptTokens: finalPromptTokens, completionTokens: finalCompletionTokens, model: usageModel, reasoningEffort: billableReasoningEffort, providerPool, fallbackUsed, plan: webPlan }),
+                prisma.message.create({
+                  data: {
+                    conversationId: activeConversationId,
+                    role: "assistant",
+                    content: completionText,
+                  },
+                }),
+                prisma.conversation.update({
+                  where: { id: activeConversationId },
+                  data: { updatedAt: new Date() },
+                }),
+              ]);
+            } else {
+              await cancelUsageReservation(reservationId);
+            }
           } catch (dbErr) {
             console.error("Failed to save tokens to SQLite database:", dbErr);
           }
 
-          controller.close();
+          try { controller.close(); } catch {}
         }
       },
     });

@@ -15,7 +15,11 @@ export async function PATCH(req) {
     }
 
     if (action === "delete") {
-      await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+      const admins = await prisma.user.findMany({ where: { id: { in: userIds }, role: "ADMIN" }, select: { id: true } });
+      if (admins.length > 0) {
+        return NextResponse.json({ error: "Admin users cannot be deleted with bulk delete." }, { status: 400 });
+      }
+      await prisma.user.deleteMany({ where: { id: { in: userIds }, role: { not: "ADMIN" } } });
     } else {
       const status = action === "activate" ? "active" : "suspended";
       await prisma.subscription.updateMany({

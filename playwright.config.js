@@ -14,6 +14,7 @@ export default defineConfig({
   },
   webServer: {
     command: "npm run start -- -p 3025",
+    env: { ...process.env, ADMIN_2FA_CODE: process.env.ADMIN_2FA_CODE || "123456", REQUIRE_EMAIL_VERIFICATION: "false" },
     url: "http://localhost:3025",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

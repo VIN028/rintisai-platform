@@ -6,8 +6,11 @@ export function ThemeToggle() {
   const [dark, setDark] = useState(false);
 
   useEffect(() => {
+    const storedTheme = localStorage.getItem("theme");
+    const next = storedTheme !== "light";
+    document.documentElement.classList.toggle("dark", next);
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDark(document.documentElement.classList.contains("dark"));
+    setDark(next);
   }, []);
 
   const toggle = () => {

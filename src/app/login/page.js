@@ -1,40 +1,97 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Lock, Mail, ArrowRight, Bot } from "lucide-react";
+import { clearFieldValidity, handleFormInvalid } from "@/lib/form-validation";
 
 function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [verificationEmail, setVerificationEmail] = useState("");
+  const [adminOtp, setAdminOtp] = useState("");
+  const [otpRequired, setOtpRequired] = useState(false);
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirect = searchParams.get("redirect") || "/";
 
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => {
+        if (!data?.user) return;
+        router.replace(data.user.role === "ADMIN" ? "/admin" : "/");
+      })
+      .catch(() => {});
+  }, [router]);
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setError("");
+    setNotice("");
+    setVerificationEmail("");
+    if (!email.trim()) {
+      setError("Email is required.");
+      return;
+    }
+    if (!password) {
+      setError("Password is required.");
+      return;
+    }
+    if (otpRequired && !adminOtp.trim()) {
+      setError("Admin 2FA code is required.");
+      return;
+    }
     setLoading(true);
 
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, adminOtp: otpRequired ? adminOtp : undefined }),
         credentials: "include",
       });
 
       const data = await response.json();
 
       if (!response.ok) {
+        if (data.needsVerification && data.email) {
+          setVerificationEmail(data.email);
+        }
         throw new Error(data.error || "Failed to sign in.");
       }
 
-      router.push(redirect);
+      if (data.requiresAdminOtp) {
+        setOtpRequired(true);
+        setNotice("Enter the admin 2FA code to continue.");
+        return;
+      }
+
+      router.push(data.user?.role === "ADMIN" ? "/admin" : redirect);
       router.refresh();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resendVerification = async () => {
+    if (!verificationEmail) return;
+    setLoading(true);
+    try {
+      const response = await fetch("/api/auth/resend-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: verificationEmail }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to resend verification code.");
+      setError(data.message || "Verification code sent.");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -62,7 +119,27 @@ function LoginForm() {
           </div>
         )}
 
-        <form onSubmit={handleLogin}>
+        {notice && (
+          <div className="mb-6 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-sm text-emerald-300" style={{ marginBottom: '1.5rem', padding: '1rem', borderRadius: '0.75rem', backgroundColor: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.2)', fontSize: '0.875rem', color: '#6ee7b7', textAlign: 'left' }}>
+            {notice}
+          </div>
+        )}
+
+        {verificationEmail && (
+          <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-sm text-amber-100 space-y-3">
+            <p>Verification is still pending for <span className="font-semibold">{verificationEmail}</span>.</p>
+            <div className="flex gap-2">
+              <Link href={`/verify-email?email=${encodeURIComponent(verificationEmail)}`} className="flex-1 py-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] border border-white/10 text-center text-sm font-medium transition">
+                Verify Email
+              </Link>
+              <button type="button" onClick={resendVerification} disabled={loading} className="flex-1 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 disabled:bg-white/[0.04] text-sm font-medium transition cursor-pointer">
+                Resend Code
+              </button>
+            </div>
+          </div>
+        )}
+
+        <form onSubmit={handleLogin} noValidate onInvalid={handleFormInvalid} onInput={clearFieldValidity}>
           <div className="form-group">
             <label className="form-label">Email</label>
             <div className="input-container">
@@ -72,6 +149,7 @@ function LoginForm() {
               <input
                 type="email"
                 required
+                data-label="Email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="nama@email.com"
@@ -79,6 +157,27 @@ function LoginForm() {
               />
             </div>
           </div>
+
+          {otpRequired && (
+            <div className="form-group">
+              <label className="form-label">Admin 2FA Code</label>
+              <div className="input-container">
+                <div className="input-icon">
+                  <Lock size={18} />
+                </div>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  required
+                  data-label="Admin 2FA Code"
+                  value={adminOtp}
+                  onChange={(e) => setAdminOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="6-digit code"
+                  className="auth-input"
+                />
+              </div>
+            </div>
+          )}
 
           <div className="form-group">
             <label className="form-label">Password</label>
@@ -89,6 +188,7 @@ function LoginForm() {
               <input
                 type="password"
                 required
+                data-label="Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
@@ -102,19 +202,10 @@ function LoginForm() {
             disabled={loading}
             className="auth-btn"
           >
-            {loading ? "Verifying..." : "Sign In"}
+            {loading ? "Verifying..." : otpRequired ? "Verify 2FA" : "Sign In"}
             {!loading && <ArrowRight size={16} />}
           </button>
 
-          <div className="mt-4 relative">
-            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/10"></div></div>
-            <div className="relative flex justify-center text-xs"><span className="px-2 bg-[#090b14] text-gray-500">or</span></div>
-          </div>
-
-          <a href="/api/auth/google" className="w-full mt-4 py-2.5 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-gray-300 font-medium text-sm transition text-center flex items-center justify-center gap-2 cursor-pointer">
-            <svg width="16" height="16" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-            Continue with Google
-          </a>
         </form>
 
         <p className="mt-8 text-center text-xs text-gray-400" style={{ marginTop: '2rem', fontSize: '0.75rem', color: '#9ca3af' }}>

@@ -26,8 +26,9 @@ export async function POST(req) {
     resetMap.set(key, attempts);
 
     const user = await prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
-    if (!user || user.resetCode !== hashResetCode(resetCode.trim())) {
-      return NextResponse.json({ error: "Invalid reset code." }, { status: 400 });
+    const normalizedCode = String(resetCode).trim().toLowerCase();
+    if (!user || user.resetCode !== hashResetCode(normalizedCode)) {
+      return NextResponse.json({ error: "Invalid reset code. If you requested another code, use the newest email. Older reset codes no longer work." }, { status: 400 });
     }
     if (!user.resetCodeExpires || new Date() > new Date(user.resetCodeExpires)) {
       return NextResponse.json({ error: "Reset code has expired." }, { status: 400 });

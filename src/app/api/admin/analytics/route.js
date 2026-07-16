@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { authenticateAdmin } from "@/lib/auth";
 
-const planPrices = { free: 0, student: 29000, starter: 49000, pro: 89000, developer: 149000 };
+const planPrices = { free: 0, student: 39000, starter: 59000, pro: 129000, developer: 199000 };
 
 export async function GET(req) {
   try {

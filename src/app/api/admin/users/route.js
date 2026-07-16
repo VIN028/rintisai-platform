@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { authenticateAdmin } from "@/lib/auth";
+import { getPlanDefinition } from "@/lib/plans";
 import { getEffectiveLimits } from "@/app/api/auth/me/route";
 import { maskApiKey } from "@/lib/security";
+import { buildFreeSubscriptionData, expireSubscriptionIfNeeded, normalizeStatusForExpiry, resolveAdminPatchExpiry, shouldDowngradeToFree } from "@/lib/subscription-expiry";
 
 function normalizeLimit(value) {
   if (value === "" || value === null || value === undefined) return null;
@@ -15,10 +17,6 @@ export async function GET(req) {
     await authenticateAdmin(req);
 
     const now = new Date();
-    const fiveHoursAgo = new Date(now.getTime() - 5 * 60 * 60 * 1000);
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-
     const users = await prisma.user.findMany({
       include: {
         subscription: true,
@@ -45,28 +43,33 @@ export async function GET(req) {
     }, {});
 
     const rows = await Promise.all(users.map(async (user) => {
-      const [usage5h, usage7d, usage30d] = await Promise.all([
-        prisma.tokenUsage.aggregate({ where: { userId: user.id, timestamp: { gte: fiveHoursAgo } }, _sum: { totalTokens: true } }),
-        prisma.tokenUsage.aggregate({ where: { userId: user.id, timestamp: { gte: sevenDaysAgo } }, _sum: { totalTokens: true } }),
-        prisma.tokenUsage.aggregate({ where: { userId: user.id, timestamp: { gte: thirtyDaysAgo } }, _sum: { totalTokens: true } }),
-      ]);
-
-      const limits = getEffectiveLimits(user.subscription);
+      const subscription = await expireSubscriptionIfNeeded(user.subscription, now);
+      const limits = getEffectiveLimits(subscription);
+      const currentWindowStart = limits.windowStart ? new Date(limits.windowStart) : new Date(now.getTime() - (limits.windowMs || 30 * 24 * 60 * 60 * 1000));
+      const usageCurrent = await prisma.tokenUsage.aggregate({ where: { userId: user.id, timestamp: { gte: currentWindowStart } }, _sum: { totalTokens: true }, _count: true });
       const userApiKeys = apiKeysByUserId[user.id] || [];
+
+      const usageWindow = (usage) => ({
+        requests: usage._count || 0,
+        usageUnits: usage._sum?.totalTokens || 0,
+        units: usage._sum?.totalTokens || 0,
+      });
 
       return {
         id: user.id,
         email: user.email,
+        emailVerifiedAt: user.emailVerifiedAt,
         name: user.name,
         role: user.role,
         createdAt: user.createdAt,
         apiKeys: userApiKeys,
         apiKeyCount: userApiKeys.length,
-        subscription: user.subscription,
+        subscription,
         usage: {
-          rolling5h: usage5h._sum.totalTokens || 0,
-          weekly: usage7d._sum.totalTokens || 0,
-          monthly: usage30d._sum.totalTokens || 0,
+          current: usageWindow(usageCurrent),
+          windowLabel: limits.windowLabel,
+          windowKey: limits.windowKey,
+          limit: limits.limit,
           limits,
         },
       };
@@ -82,7 +85,7 @@ export async function PATCH(req) {
   try {
     await authenticateAdmin(req);
     const body = await req.json().catch(() => ({}));
-    const { userId, plan, status, expiryDate, apiAccessEnabled, customLimit5h, customLimitWeekly, customLimitMonthly } = body;
+    const { userId, plan, billingInterval, status, expiryDate, apiAccessEnabled, customLimit5h, customLimitWeekly, customLimitMonthly } = body;
 
     if (!userId) {
       return NextResponse.json({ error: "userId wajib diisi." }, { status: 400 });
@@ -97,32 +100,34 @@ export async function PATCH(req) {
       return NextResponse.json({ error: "User tidak ditemukan." }, { status: 404 });
     }
 
-    const nextPlan = ["free", "student", "starter", "pro", "developer"].includes(plan) ? plan : existingUser.subscription?.plan || "free";
-    const nextStatus = ["active", "inactive", "expired", "cancelled", "suspended"].includes(status) ? status : existingUser.subscription?.status || "inactive";
-    const nextExpiry = expiryDate ? new Date(expiryDate) : existingUser.subscription?.expiryDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-    const nextApiAccess = typeof apiAccessEnabled === "boolean" ? apiAccessEnabled : nextPlan === "developer";
+    const nextPlan = plan === "free" || getPlanDefinition(plan) ? plan : existingUser.subscription?.plan || "free";
+    const nextBillingInterval = billingInterval === "3day" ? "3day" : billingInterval === "weekly" ? "weekly" : "monthly";
+    const now = new Date();
+    const nextExpiry = resolveAdminPatchExpiry({ existingSubscription: existingUser.subscription, nextPlan, nextBillingInterval, requestedExpiryDate: expiryDate, now });
+    const requestedStatus = ["active", "inactive", "expired", "cancelled", "suspended"].includes(status) ? status : existingUser.subscription?.status || "inactive";
+    const nextStatus = normalizeStatusForExpiry(requestedStatus, nextExpiry, now);
+    const nextApiAccess = typeof apiAccessEnabled === "boolean" ? apiAccessEnabled : getPlanDefinition(nextPlan)?.apiAccess === true;
+    const downgradeToFree = shouldDowngradeToFree({ plan: nextPlan, status: nextStatus, expiryDate: nextExpiry, now });
+    const subscriptionData = downgradeToFree
+      ? buildFreeSubscriptionData(now)
+      : {
+        plan: nextPlan,
+        billingInterval: nextBillingInterval,
+        status: nextStatus,
+        expiryDate: nextExpiry,
+        apiAccessEnabled: nextApiAccess,
+        customLimit5h: normalizeLimit(customLimit5h),
+        customLimitWeekly: normalizeLimit(customLimitWeekly),
+        customLimitMonthly: normalizeLimit(customLimitMonthly),
+      };
 
     const subscription = await prisma.subscription.upsert({
       where: { userId },
       create: {
         userId,
-        plan: nextPlan,
-        status: nextStatus,
-        expiryDate: nextExpiry,
-        apiAccessEnabled: nextApiAccess,
-        customLimit5h: normalizeLimit(customLimit5h),
-        customLimitWeekly: normalizeLimit(customLimitWeekly),
-        customLimitMonthly: normalizeLimit(customLimitMonthly),
+        ...subscriptionData,
       },
-      update: {
-        plan: nextPlan,
-        status: nextStatus,
-        expiryDate: nextExpiry,
-        apiAccessEnabled: nextApiAccess,
-        customLimit5h: normalizeLimit(customLimit5h),
-        customLimitWeekly: normalizeLimit(customLimitWeekly),
-        customLimitMonthly: normalizeLimit(customLimitMonthly),
-      },
+      update: subscriptionData,
     });
 
     return NextResponse.json({ message: "User berhasil diperbarui.", subscription });

@@ -4,6 +4,7 @@ import { authenticateUser } from "@/lib/auth";
 import { getActivePlan } from "../../auth/me/route";
 import { ALLOWED_MODELS, getMaxContextTokens, getMaxOutputTokens } from "@/lib/models";
 import { compactMessagesForContext } from "@/lib/context";
+import { resolveEntitlementForModel } from "@/lib/entitlements";
 
 export async function GET(req, { params }) {
   try {
@@ -13,7 +14,9 @@ export async function GET(req, { params }) {
     const url = new URL(req.url);
     const requestedModel = url.searchParams.get("model") || "gpt-5.4-mini";
     const selectedModel = ALLOWED_MODELS.has(requestedModel) ? requestedModel : "gpt-5.4-mini";
-    const plan = getActivePlan(user.subscription);
+    const fallbackPlan = getActivePlan(user.subscription);
+    const entitlementAccess = await resolveEntitlementForModel({ userId, subscription: user.subscription, model: selectedModel, fallbackPlan });
+    const plan = entitlementAccess.plan;
 
     const conversation = await prisma.conversation.findFirst({
       where: { id, userId },

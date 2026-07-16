@@ -32,6 +32,7 @@ const getClientIp = (request) => {
   const candidates = [
     headers.get("cf-connecting-ip"),
     headers.get("x-real-ip"),
+    // Only use X-Forwarded-For after trusted proxy headers; clients can spoof it on direct requests.
     headers.get("x-forwarded-for")?.split(",")?.[0]?.trim(),
     request.ip,
   ];
@@ -76,6 +77,7 @@ const isLocalNetwork = (ip) => (
 
 const isAllowedIp = (ip) => {
   const allowedIps = parseList(process.env.ADMIN_ALLOWED_IPS);
+  if (allowedIps.includes("disable") || allowedIps.includes("*")) return true;
 
   // Direct `next start` on a LAN IP may not provide x-forwarded-for/x-real-ip.
   // In that mode, rely on authenticated admin routes instead of hard-blocking.
@@ -105,6 +107,32 @@ export function proxy(request) {
   const clientIp = getClientIp(request);
   const pathname = request.nextUrl?.pathname || "";
   const method = request.method || "GET";
+  const isPublicApi = pathname.startsWith("/api/v1/");
+
+  if (isPublicApi) {
+    const requestedHeaders = request.headers.get("access-control-request-headers");
+    const corsHeaders = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+      "Access-Control-Allow-Headers": requestedHeaders || "Authorization, Content-Type, X-Requested-With, X-API-Key, OpenAI-Beta, Anthropic-Version, Anthropic-Dangerous-Direct-Browser-Access",
+      "Access-Control-Max-Age": "86400",
+      "Vary": "Access-Control-Request-Headers",
+    };
+    if (method === "OPTIONS") {
+      return new NextResponse(null, { status: 204, headers: corsHeaders });
+    }
+
+    if ((pathname === "/api/v1/chat/completions" || pathname === "/api/v1/messages") && !rateLimit(clientIp)) {
+      return new NextResponse(JSON.stringify({ error: "Too many requests" }), {
+        status: 429,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const response = NextResponse.next();
+    for (const [key, value] of Object.entries(corsHeaders)) response.headers.set(key, value);
+    return response;
+  }
 
   if (pathname.startsWith("/api/") && !["GET", "HEAD", "OPTIONS"].includes(method)) {
     const origin = request.headers.get("origin");
@@ -116,7 +144,7 @@ export function proxy(request) {
     }
   }
 
-  if ((pathname === "/api/chat" || pathname === "/api/v1/chat/completions") && !rateLimit(clientIp)) {
+  if ((pathname === "/api/chat" || pathname === "/api/v1/chat/completions" || pathname === "/api/v1/messages") && !rateLimit(clientIp)) {
     return new NextResponse(JSON.stringify({ error: "Too many requests" }), {
       status: 429,
       headers: { "Content-Type": "application/json" },
@@ -125,6 +153,10 @@ export function proxy(request) {
 
   if (pathname === "/admin/login" || pathname.startsWith("/admin/login/")) {
     return NextResponse.next();
+  }
+
+  if (pathname.startsWith("/admin") && !request.cookies.get("__Host-token") && !request.cookies.get("token")) {
+    return NextResponse.redirect(new URL("/admin/login", request.url));
   }
 
   const requiresIpAllowlist = pathname.startsWith("/admin") || pathname.startsWith("/api/admin");

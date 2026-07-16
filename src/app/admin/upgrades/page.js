@@ -4,6 +4,20 @@ import { useCallback, useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, Search, XCircle } from "lucide-react";
 
 const PER_PAGE = 15;
+const formatRp = (value) => `Rp ${Number(value || 0).toLocaleString("id-ID")}`;
+const formatUsdMicros = (value) => `$${(Number(value || 0) / 1_000_000).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`;
+
+function formatAge(minutes) {
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+function formatDateTime(value) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
+}
 
 export default function AdminUpgradesPage() {
   const [requests, setRequests] = useState([]);
@@ -114,23 +128,49 @@ export default function AdminUpgradesPage() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-white">{req.user?.name || req.user?.email}</span>
+                      <span className="font-bold text-white">{req.user?.name || req.user?.email || "Unknown user"}</span>
                       <span className={`text-[10px] px-1.5 py-0.5 rounded-full capitalize ${
                         req.status === "completed" ? "bg-emerald-500/10 text-emerald-300" :
                         req.status === "confirmed" ? "bg-indigo-500/10 text-indigo-300" :
                         req.status === "rejected" ? "bg-red-500/10 text-red-300" :
                         "bg-amber-500/10 text-amber-300"
                       }`}>{req.status}</span>
+                      {req.ops?.isRenewal && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300">Renewal</span>}
+                      {req.ops?.isStacking && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/10 text-violet-300">Stack</span>}
                     </div>
+                    {req.user?.email && req.user?.name && <div className="text-[10px] text-gray-500 mt-0.5 font-mono truncate">{req.user.email}</div>}
                     <div className="text-xs text-gray-400 mt-1 capitalize">
-                      {req.plan} plan · {req.paymentMethod}
-                      {req.transferAmount ? <span> · Rp {req.transferAmount.toLocaleString("id-ID")}</span> : null}
+                      {req.ops?.expectedLabel || req.plan} · {req.paymentMethod}
+                      {req.ops?.ageMinutes != null ? <span> · pending {formatAge(req.ops.ageMinutes)}</span> : null}
                     </div>
                     <div className="text-[10px] text-gray-500 mt-1">
                       Code: <span className="text-indigo-300 font-mono">{req.uniqueCode}</span>
                       {req.paymentRef ? <span className="ml-3">Ref: {req.paymentRef}</span> : null}
                       <span className="ml-3">{new Date(req.createdAt).toLocaleString("en-US")}</span>
                     </div>
+                    {req.ops && (
+                      <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
+                        <span className="rounded-lg border border-white/5 bg-black/10 px-2 py-1"><span className="text-gray-500 block">Base</span><span className="font-mono text-white">{formatRp(req.ops.baseAmount)}</span></span>
+                        <span className="rounded-lg border border-white/5 bg-black/10 px-2 py-1"><span className="text-gray-500 block">Unique</span><span className="font-mono text-indigo-300">+{req.ops.uniqueCode}</span></span>
+                        <span className="rounded-lg border border-white/5 bg-black/10 px-2 py-1"><span className="text-gray-500 block">Expected Transfer</span><span className="font-mono text-emerald-300">{formatRp(req.ops.transferAmount)}</span></span>
+                        {req.ops.type === "api_topup" ? (
+                          <span className="rounded-lg border border-emerald-500/10 bg-emerald-500/5 px-2 py-1"><span className="text-gray-500 block">API Credit</span><span className="font-mono text-emerald-300">{formatUsdMicros(req.ops.estimatedUsdMicros)}</span></span>
+                        ) : (
+                          <span className="rounded-lg border border-white/5 bg-black/10 px-2 py-1"><span className="text-gray-500 block">Type</span><span className="font-mono text-gray-300 capitalize">{req.ops.type.replace("_", " ")}</span></span>
+                        )}
+                      </div>
+                    )}
+                    {req.ops?.type === "subscription" && (
+                      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
+                        <span className="rounded-lg border border-white/5 bg-black/10 px-2 py-1"><span className="text-gray-500 block">Current Expiry</span><span className="font-mono text-gray-300">{formatDateTime(req.ops.currentExpiry)}</span></span>
+                        <span className="rounded-lg border border-emerald-500/10 bg-emerald-500/5 px-2 py-1"><span className="text-gray-500 block">After Activate</span><span className="font-mono text-emerald-300">{formatDateTime(req.ops.nextExpiry)}</span></span>
+                      </div>
+                    )}
+                    {req.adminActionAt && (
+                      <div className="mt-2 text-[10px] text-gray-500">
+                        Last admin action by <span className="text-gray-300">{req.adminActionBy || "admin"}</span> at {new Date(req.adminActionAt).toLocaleString("id-ID")}
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <a href={`https://wa.me/${req.paymentRef?.replace(/\D/g,"") || ""}`} target="_blank" rel="noopener noreferrer" className="text-[10px] px-2 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 cursor-pointer">WA</a>

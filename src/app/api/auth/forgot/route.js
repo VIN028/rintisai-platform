@@ -17,7 +17,7 @@ export async function POST(req) {
     const now = Date.now();
     const attempts = (forgotMap.get(key) || []).filter((t) => now - t < 15 * 60 * 1000);
     if (attempts.length >= 3) {
-      return NextResponse.json({ message: "If this email is registered, a reset code has been sent." });
+      return NextResponse.json({ error: "Too many reset code requests. Please wait 15 minutes before requesting another code." }, { status: 429 });
     }
     attempts.push(now);
     forgotMap.set(key, attempts);
@@ -32,7 +32,7 @@ export async function POST(req) {
 
     await prisma.user.update({ where: { id: user.id }, data: { resetCode: hashResetCode(resetCode), resetCodeExpires } });
 
-    const emailContent = resetCodeEmail(resetCode);
+    const emailContent = resetCodeEmail(resetCode, user.email);
     await sendEmail({ to: user.email, ...emailContent });
 
     return NextResponse.json({ message: "Reset code sent to your email. Check your inbox." });

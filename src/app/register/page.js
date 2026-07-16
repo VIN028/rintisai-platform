@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Lock, Mail, User, Bot, ArrowRight } from "lucide-react";
+import { clearFieldValidity, handleFormInvalid } from "@/lib/form-validation";
 
 export default function RegisterPage() {
   const [name, setName] = useState("");
@@ -11,6 +12,7 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [verificationEmail, setVerificationEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
@@ -18,6 +20,23 @@ export default function RegisterPage() {
     e.preventDefault();
     setError("");
     setSuccess("");
+    setVerificationEmail("");
+    if (!name.trim()) {
+      setError("Full Name is required.");
+      return;
+    }
+    if (!email.trim()) {
+      setError("Email is required.");
+      return;
+    }
+    if (!password) {
+      setError("Password is required.");
+      return;
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
     setLoading(true);
 
     try {
@@ -31,11 +50,38 @@ export default function RegisterPage() {
       const data = await response.json();
 
       if (!response.ok) {
+        if (data.needsVerification && data.email) {
+          setVerificationEmail(data.email);
+        }
         throw new Error(data.error || "Failed to create account.");
       }
 
-      window.location.href = "/";
+      if (data.requiresVerification) {
+        router.push(`/verify-email?email=${encodeURIComponent(data.email || email)}&sent=1`);
+      } else {
+        router.push("/");
+      }
       router.refresh();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resendVerification = async () => {
+    if (!verificationEmail) return;
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/auth/resend-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: verificationEmail }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to resend verification code.");
+      setSuccess(data.message || "Verification code sent.");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -54,7 +100,7 @@ export default function RegisterPage() {
             <Bot size={36} />
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-white mb-1" style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'white', marginBottom: '0.25rem' }}>Create Account</h1>
-          <p className="text-sm text-gray-400 text-center" style={{ fontSize: '0.875rem', color: '#9ca3af' }}>Create an account to start with free access. Upgrade anytime for more.</p>
+          <p className="text-sm text-gray-400 text-center" style={{ fontSize: '0.875rem', color: '#9ca3af' }}>Create your account first, then verify your email with a 6-digit code.</p>
         </div>
 
         {error && (
@@ -69,7 +115,22 @@ export default function RegisterPage() {
           </div>
         )}
 
-        <form onSubmit={handleRegister}>
+        {verificationEmail && (
+          <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-sm text-amber-100 space-y-3">
+            <p>This email is already registered but not verified yet.</p>
+            <p className="font-semibold break-all">{verificationEmail}</p>
+            <div className="flex gap-2">
+              <Link href={`/verify-email?email=${encodeURIComponent(verificationEmail)}`} className="flex-1 py-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] border border-white/10 text-center text-sm font-medium transition">
+                Verify Email
+              </Link>
+              <button type="button" onClick={resendVerification} disabled={loading} className="flex-1 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 disabled:bg-white/[0.04] text-sm font-medium transition cursor-pointer">
+                Resend Code
+              </button>
+            </div>
+          </div>
+        )}
+
+        <form onSubmit={handleRegister} noValidate onInvalid={handleFormInvalid} onInput={clearFieldValidity}>
           <div className="form-group">
             <label className="form-label">Full Name</label>
             <div className="input-container">
@@ -79,6 +140,7 @@ export default function RegisterPage() {
               <input
                 type="text"
                 required
+                data-label="Full Name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Budi Santoso"
@@ -96,6 +158,7 @@ export default function RegisterPage() {
               <input
                 type="email"
                 required
+                data-label="Email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="nama@email.com"
@@ -113,6 +176,8 @@ export default function RegisterPage() {
               <input
                 type="password"
                 required
+                minLength={8}
+                data-label="Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="At least 8 characters"
