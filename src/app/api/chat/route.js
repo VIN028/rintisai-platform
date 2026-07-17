@@ -14,6 +14,7 @@ import { expireSubscriptionIfNeeded } from "@/lib/subscription-expiry";
 
 const UPSTREAM_ATTEMPT_TIMEOUT_MS = 25_000;
 const MIN_COMPLETION_TOKENS = 512;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const CHAT_TOOL_DEFINITIONS = {
   file_search: { label: "File Search", description: "Search and use attached or project file context when available." },
   web_search: { label: "Web Search", description: "Search the web for current information when the provider supports it." },
@@ -32,25 +33,6 @@ function buildToolInstructions(enabledTools, attachmentMode) {
   if (attachmentMode === "provider") lines.push("- Attachment upload mode: prefer native provider/file-search handling when available; otherwise use extracted text context already included in the prompt.");
   if (lines.length === 0) return "";
   return `Enabled tool preferences for this request:\n${lines.join("\n")}\nIf a native tool is not available in this environment, continue with the available context and say what could not be executed.`;
-}
-
-function toOpenAiToolDefinitions(enabledTools) {
-  return enabledTools.map((key) => ({
-    type: "function",
-    function: {
-      name: key,
-      description: CHAT_TOOL_DEFINITIONS[key].description,
-      parameters: { type: "object", properties: { query: { type: "string" } } },
-    },
-  }));
-}
-
-function toAnthropicToolDefinitions(enabledTools) {
-  return enabledTools.map((key) => ({
-    name: key,
-    description: CHAT_TOOL_DEFINITIONS[key].description,
-    input_schema: { type: "object", properties: { query: { type: "string" } } },
-  }));
 }
 
 function fitCompletionTokensToContext({ promptTokens, maxTokens, maxContextTokens }) {
@@ -275,8 +257,6 @@ export async function POST(req) {
                     system: systemPrompt || undefined,
                     messages: anthropicMessages,
                     max_tokens: maxOutputTokens,
-                    tools: enabledTools.length > 0 ? toAnthropicToolDefinitions(enabledTools) : undefined,
-                    tool_choice: enabledTools.length > 0 ? { type: "auto" } : undefined,
                     ...(stream ? { stream: true } : {}),
                   }),
                 });
@@ -286,12 +266,18 @@ export async function POST(req) {
             };
 
             let anthropicResponse;
-            try {
-              anthropicResponse = await fetchAnthropic({ stream: true });
-            } catch (err) {
-              console.log("Anthropic-compatible streaming request retrying once:", err?.message || err);
-              anthropicResponse = await fetchAnthropic({ stream: true });
+            let lastAnthropicError;
+            for (let attempt = 1; attempt <= 3; attempt += 1) {
+              try {
+                anthropicResponse = await fetchAnthropic({ stream: true });
+                break;
+              } catch (err) {
+                lastAnthropicError = err;
+                console.log(`Anthropic-compatible streaming request retrying (${attempt}/3):`, err?.message || err);
+                if (attempt < 3) await sleep(750 * attempt);
+              }
             }
+            if (!anthropicResponse) throw lastAnthropicError;
 
             if (!anthropicResponse.ok) {
               const errText = await anthropicResponse.text();
@@ -443,8 +429,6 @@ export async function POST(req) {
       max_tokens: maxOutputTokens,
       stream: true,
       stream_options: { include_usage: true },
-      tools: enabledTools.length > 0 ? toOpenAiToolDefinitions(enabledTools) : undefined,
-      tool_choice: enabledTools.length > 0 ? "auto" : undefined,
       ...(["pro", "developer", "gpt_code", "codex_pro"].includes(webPlan) && upstreamReasoningEffort ? { reasoning_effort: upstreamReasoningEffort } : {}),
     };
 
@@ -466,6 +450,31 @@ export async function POST(req) {
       }
     };
 
+    const fetchFallbackCompletion = async ({ key = resellerApiKey, model = openAiPayload.model } = {}) => {
+      const attemptController = new AbortController();
+      const attemptTimeout = setTimeout(() => attemptController.abort(), UPSTREAM_ATTEMPT_TIMEOUT_MS);
+      try {
+        return await fetch(`${resellerBaseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${key}`,
+            "Content-Type": "application/json",
+          },
+          signal: attemptController.signal,
+          body: JSON.stringify({
+            ...openAiPayload,
+            model,
+            stream: false,
+            stream_options: undefined,
+            tools: undefined,
+            tool_choice: undefined,
+          }),
+        });
+      } finally {
+        clearTimeout(attemptTimeout);
+      }
+    };
+
     let apiResponse;
     let providerPool = usageProviderPool;
     let fallbackUsed = false;
@@ -473,7 +482,18 @@ export async function POST(req) {
     try {
       apiResponse = await fetchWithKey(resellerApiKey);
     } catch (err) {
-      if (err.name === "AbortError" && reseller.fallbackApiKey) {
+      if (err.name !== "AbortError") {
+        try {
+          console.log("OpenAI-compatible request retrying after network error:", err?.message || err);
+          await sleep(750);
+          apiResponse = await fetchWithKey(resellerApiKey);
+        } catch (retryErr) {
+          err = retryErr;
+        }
+      }
+      if (apiResponse) {
+        // Recovered on retry.
+      } else if (err.name === "AbortError" && reseller.fallbackApiKey) {
         try {
           apiResponse = await fetchWithKey(reseller.fallbackApiKey);
           providerPool = "pro";
@@ -579,7 +599,7 @@ export async function POST(req) {
               if (dataContent === "[DONE]") {
                 if (!completionText.trim()) {
                   shouldPersistCompletion = false;
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: "Current model returned an empty response. Please try again or choose another model." })}\n\n`));
+                  return true;
                 }
                 controller.enqueue(encoder.encode("data: [DONE]\n\n"));
                 return true;
@@ -630,6 +650,37 @@ export async function POST(req) {
         } catch (err) {
           if (err?.code !== "ERR_INVALID_STATE") console.error("Error reading stream:", err);
         } finally {
+          if (!completionText.trim()) {
+            try {
+              console.warn("OpenAI-compatible stream returned no content; retrying once without native tools.");
+              const fallbackResponse = await fetchFallbackCompletion({ key: fallbackUsed && reseller.fallbackApiKey ? reseller.fallbackApiKey : resellerApiKey, model: usageModel });
+              if (fallbackResponse.ok) {
+                const fallbackData = await fallbackResponse.json();
+                const fallbackText = sanitizeAssistantContent(fallbackData.choices?.[0]?.message?.content || "");
+                if (fallbackText) {
+                  completionText = fallbackText;
+                  actualPromptTokens = fallbackData.usage?.prompt_tokens ?? actualPromptTokens;
+                  actualCompletionTokens = fallbackData.usage?.completion_tokens ?? actualCompletionTokens;
+                  shouldPersistCompletion = true;
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: fallbackText })}\n\n`));
+                  controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                }
+              } else {
+                const errText = await fallbackResponse.text().catch(() => "");
+                console.error("OpenAI-compatible fallback retry failed:", errText.slice(0, 500));
+              }
+            } catch (retryErr) {
+              console.error("OpenAI-compatible fallback retry threw:", retryErr);
+            }
+          }
+
+          if (!completionText.trim()) {
+            try {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: "Current model is temporarily unavailable. Please try again later or choose another model." })}\n\n`));
+              controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            } catch {}
+          }
+
           const finalPromptTokens = actualPromptTokens !== null ? actualPromptTokens : contextPlan.promptTokens;
           const finalCompletionTokens = actualCompletionTokens !== null ? actualCompletionTokens : estimateTokens(completionText);
           try {

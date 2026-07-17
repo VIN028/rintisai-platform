@@ -278,10 +278,13 @@ export async function syncSubscriptionSummaryFromEntitlements({ userId, preferre
     });
   }
 
-  const maxExpiry = currentOrFuture.reduce((latest, item) => {
+  let maxExpiry = currentOrFuture.reduce((latest, item) => {
     const expiresAt = toDate(item.expiresAt);
     return expiresAt > latest ? expiresAt : latest;
   }, now);
+  const existingSubscription = await prisma.subscription.findUnique({ where: { userId } }).catch(() => null);
+  const existingExpiry = existingSubscription?.status === "active" && existingSubscription.expiryDate ? toDate(existingSubscription.expiryDate, null) : null;
+  if (existingExpiry && existingExpiry > maxExpiry) maxExpiry = existingExpiry;
   const representative = preferredEntitlement || currentOrFuture
     .slice()
     .sort((a, b) => new Date(b.createdAt || b.startsAt).getTime() - new Date(a.createdAt || a.startsAt).getTime())[0];

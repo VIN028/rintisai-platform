@@ -416,7 +416,7 @@ export default function HomePage() {
   const [modelDropOpen, setModelDropOpen] = useState(false);
   const [reasonDropOpen, setReasonDropOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => (typeof window === "undefined" ? true : window.innerWidth >= 768));
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [dragging, setDragging] = useState(false);
   const [editingConvId, setEditingConvId] = useState(null);
@@ -448,6 +448,7 @@ export default function HomePage() {
   const [enabledChatTools, setEnabledChatTools] = useState([]);
   const [pinnedChatTools, setPinnedChatTools] = useState([]);
   const [attachmentMode, setAttachmentMode] = useState("text");
+  const [isCompactViewport, setIsCompactViewport] = useState(() => (typeof window === "undefined" ? false : window.innerWidth < 768));
   const fileInputRef = useRef(null);
   const inputTextareaRef = useRef(null);
   const activeConvIdRef = useRef(null);
@@ -486,6 +487,7 @@ export default function HomePage() {
   const [cashoutSuccess, setCashoutSuccess] = useState("");
   const [cashoutLoading, setCashoutLoading] = useState(false);
 
+  const chatScrollRef = useRef(null);
   const chatEndRef = useRef(null);
 
   const setConversationStreaming = (conversationId, isStreaming) => {
@@ -856,9 +858,21 @@ export default function HomePage() {
     return () => window.clearTimeout(timer);
   }, [inputMessage]);
 
-  // Scroll to bottom when messages change
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "instant" });
+    const updateViewportMode = () => setIsCompactViewport(window.innerWidth < 768);
+    updateViewportMode();
+    window.addEventListener("resize", updateViewportMode);
+    return () => window.removeEventListener("resize", updateViewportMode);
+  }, []);
+
+  // Keep new output visible without stealing scroll when the user is reading older messages.
+  useEffect(() => {
+    const container = chatScrollRef.current;
+    if (!container) return;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (distanceFromBottom < 180) {
+      chatEndRef.current?.scrollIntoView({ behavior: "instant", block: "end" });
+    }
   }, [messages]);
 
   useEffect(() => {
@@ -2365,17 +2379,20 @@ export default function HomePage() {
       )}
 
       {authState === "authenticated" && (
-    <div className="flex h-screen overflow-hidden bg-main">
+    <div className="flex h-screen min-h-0 overflow-hidden bg-main">
+
+      {sidebarOpen && <div className="fixed inset-0 z-10 bg-black/55 backdrop-blur-sm md:hidden" onClick={() => setSidebarOpen(false)} />}
 
       {/* 🚀 SIDEBAR COMPONENT */}
       <aside
-        className="relative z-20 h-full glass-panel flex flex-col shrink-0 overflow-hidden"
-        style={{ width: sidebarOpen ? sidebarWidth : 0, minWidth: 0, transition: "width 0.25s ease" }}
+        className={`fixed inset-y-0 left-0 z-20 h-full glass-panel flex-col shrink-0 overflow-hidden md:relative md:inset-auto md:flex ${sidebarOpen ? "flex" : "hidden"}`}
+        style={{ width: sidebarOpen ? `min(${sidebarWidth}px, 86vw)` : 0, minWidth: 0, transition: "width 0.25s ease" }}
       >
+        {sidebarOpen && <>
         {/* Drag handle */}
         {sidebarOpen && (
           <div
-            className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize z-30 hover:bg-indigo-500/30 transition-colors"
+            className="absolute top-0 right-0 hidden w-1.5 h-full cursor-col-resize z-30 hover:bg-indigo-500/30 transition-colors md:block"
             onMouseDown={(e) => {
               e.preventDefault();
               setDragging(true);
@@ -2565,10 +2582,11 @@ export default function HomePage() {
             </div>
           </div>
         )}
+        </>}
       </aside>
 
       {/* 💬 MAIN CHAT WORKSPACE AREA */}
-      <main className="flex-1 flex flex-col h-full relative">
+      <main className="flex-1 min-w-0 min-h-0 flex flex-col h-full relative">
 
         {/* Top Header Bar */}
         <header className="min-h-14 sm:min-h-16 border-b border-white/5 flex flex-wrap items-center justify-between gap-2 px-3 py-2 sm:px-6 bg-slate-950/20 backdrop-blur-md z-10">
@@ -2607,6 +2625,24 @@ export default function HomePage() {
                 </>
               )}
             </div>
+
+            <button
+              onClick={() => openUpgradeModal()}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold cursor-pointer transition md:hidden"
+            >
+              <Sparkles size={13} />
+              Upgrade
+            </button>
+            <button
+              onClick={() => openAccountModal("profile")}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-gray-200 text-xs font-semibold cursor-pointer transition md:hidden"
+            >
+              <User size={13} />
+              Account
+            </button>
+            <span className="inline-flex rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] font-semibold capitalize text-gray-200 md:hidden">
+              {getPlanDefinition(subscription?.plan)?.shortLabel || subscription?.plan || "free"}
+            </span>
 
             {/* Reasoning selector */}
             {canUseReasoningEffort && (
@@ -2665,10 +2701,23 @@ export default function HomePage() {
           </div>
         </header>
 
+        {usage && user && isCompactViewport && (
+          <div className="border-b border-white/5 bg-slate-950/30 px-3 py-2">
+            <div className="flex items-center justify-between gap-3 text-[11px]">
+              <span className="font-bold text-gray-300">{usageSummary.label || "Package"} Usage</span>
+              <span className="shrink-0 text-gray-400">{usageSummary.percent}% used</span>
+              <span className="shrink-0 font-mono text-gray-400">{usageLimitLabel}</span>
+            </div>
+            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/5">
+              <div className={`h-full rounded-full transition-all ${getProgressBarColor(usageSummary.percent)}`} style={{ width: `${Math.max(usageSummary.percent, 2)}%` }} />
+            </div>
+          </div>
+        )}
+
         {/* Messages Feed Viewport */}
-        <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4 sm:space-y-6">
+        <div ref={chatScrollRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 sm:p-5 lg:p-6 space-y-4 sm:space-y-6" style={{ WebkitOverflowScrolling: "touch" }}>
           {limitExceeded || limitBlocked ? (
-            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-sm flex gap-3 items-start max-w-2xl mx-auto">
+            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-sm flex gap-3 items-start max-w-5xl mx-auto">
               <AlertTriangle size={18} className="shrink-0 mt-0.5" />
               <div>
                 <span className="font-bold block">Usage limit reached</span>
@@ -2676,7 +2725,7 @@ export default function HomePage() {
               </div>
             </div>
           ) : errorBanner && (
-            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex gap-3 items-start max-w-2xl mx-auto">
+            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex gap-3 items-start max-w-5xl mx-auto">
               <AlertTriangle size={18} className="shrink-0 mt-0.5" />
               <div>
                 <span className="font-bold block">Error:</span>
@@ -2685,7 +2734,7 @@ export default function HomePage() {
             </div>
           )}
           {interruptedUserMessage && (
-            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-100 text-sm flex flex-col gap-3 max-w-2xl mx-auto sm:flex-row sm:items-center sm:justify-between">
+            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-100 text-sm flex flex-col gap-3 max-w-5xl mx-auto sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
                 <span className="font-bold block">Generation interrupted</span>
                 <span className="block mt-0.5 text-xs text-amber-200/80">The last prompt has no assistant response. Retry it to continue.</span>
@@ -2695,7 +2744,7 @@ export default function HomePage() {
           )}
 
           {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center max-w-2xl mx-auto space-y-5 mt-8 sm:mt-16 px-2">
+            <div className="flex flex-col items-center justify-center h-full text-center max-w-5xl mx-auto space-y-5 mt-8 sm:mt-16 px-2">
               <div className="p-3 bg-indigo-500/10 rounded-2xl border border-indigo-500/20 text-indigo-400">
                 <Bot size={36} />
               </div>
@@ -2743,7 +2792,7 @@ export default function HomePage() {
             </div>
           ) : (
             /* Chat messages loop */
-            <div className="max-w-3xl mx-auto space-y-6">
+            <div className="w-full max-w-6xl mx-auto space-y-6">
               {messages.map((msg, index) => (
                 <div
                   key={index}
@@ -2758,7 +2807,7 @@ export default function HomePage() {
 
                   {/* Message bubble */}
                   <div
-                    className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-2.5 text-[14px] leading-7 ${msg.role === "user" ? "bg-indigo-600 text-white rounded-br-md" : ""} ${msg.role === "assistant" ? "relative pt-9 pr-12 bg-white/[0.04] border border-white/5 rounded-bl-md" : ""}`}
+                    className={`max-w-[92%] sm:max-w-[86%] lg:max-w-[82%] rounded-2xl px-4 py-2.5 text-[14px] leading-7 ${msg.role === "user" ? "bg-indigo-600 text-white rounded-br-md" : ""} ${msg.role === "assistant" ? "relative pt-9 pr-12 bg-white/[0.04] border border-white/5 rounded-bl-md" : ""}`}
                   >
                     {msg.role === "user" ? (
                       <div>
@@ -2834,7 +2883,7 @@ export default function HomePage() {
         {/* Input Bar Form */}
         <footer className="p-3 sm:p-6 bg-gradient-to-t from-main via-main to-transparent">
           {(limitExceeded || limitBlocked || usageWarning) && (
-            <div className={`max-w-3xl mx-auto mb-3 p-3 rounded-xl border text-sm flex gap-3 items-start ${limitExceeded || limitBlocked ? "bg-amber-500/10 border-amber-500/20 text-amber-300" : "bg-amber-500/5 border-amber-500/20 text-amber-300"}`}>
+            <div className={`max-w-6xl mx-auto mb-3 p-3 rounded-xl border text-sm flex gap-3 items-start ${limitExceeded || limitBlocked ? "bg-amber-500/10 border-amber-500/20 text-amber-300" : "bg-amber-500/5 border-amber-500/20 text-amber-300"}`}>
               <AlertTriangle size={17} className="shrink-0 mt-0.5" />
               <div>
                 <span className="font-bold block">{limitExceeded || limitBlocked ? "Usage limit reached" : "Usage nearly full"}</span>
@@ -2847,7 +2896,7 @@ export default function HomePage() {
             </div>
           )}
           {attachmentProgress.length > 0 && (
-            <div className="max-w-3xl mx-auto mb-3 space-y-2">
+            <div className="max-w-6xl mx-auto mb-3 space-y-2">
               {attachmentProgress.map((item) => (
                 <div key={item.id} className={`rounded-xl border px-3 py-2 text-xs ${item.state === "error" ? "border-red-500/20 bg-red-500/10 text-red-200" : item.state === "done" ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-200" : "border-indigo-500/20 bg-indigo-500/10 text-indigo-100"}`}>
                   <div className="flex items-center justify-between gap-3">
@@ -2865,10 +2914,11 @@ export default function HomePage() {
             </div>
           )}
           {attachedImages.length > 0 && (
-            <div className="max-w-3xl mx-auto mb-3 flex flex-wrap gap-2">
+            <div className="max-w-6xl mx-auto mb-3 flex flex-wrap gap-2">
               {attachedImages.map((img, i) => (
-                <div key={i} className="relative w-16 h-16 rounded-lg overflow-hidden border border-white/10">
-                  <img src={img.base64} alt={img.name} className="w-full h-full object-cover" />
+                <div key={i} className="relative w-20 rounded-lg overflow-hidden border border-white/10 bg-white/[0.04]">
+                  <img src={img.base64} alt={img.name} className="h-16 w-full object-cover" />
+                  <span className="block truncate px-1.5 py-1 text-[10px] text-gray-200">{img.name}</span>
                   <button onClick={() => removeAttachedImage(i)} className="absolute -top-1 -right-1 p-0.5 rounded-full bg-red-500 text-white cursor-pointer">
                     <XCircle size={14} />
                   </button>
@@ -2877,7 +2927,7 @@ export default function HomePage() {
             </div>
           )}
           {attachedFiles.length > 0 && (
-            <div className="max-w-3xl mx-auto mb-3 flex flex-wrap gap-2">
+            <div className="max-w-6xl mx-auto mb-3 flex flex-wrap gap-2">
               {attachedFiles.map((file, i) => (
                 <div key={i} className="flex items-center gap-2 max-w-full px-3 py-2 rounded-xl border border-white/10 bg-white/[0.04] text-xs text-gray-200">
                   <FileText size={14} className="shrink-0 text-indigo-300" />
@@ -2890,7 +2940,7 @@ export default function HomePage() {
               ))}
             </div>
           )}
-          <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto relative flex items-center gap-2">
+          <form onSubmit={handleSendMessage} className="max-w-6xl mx-auto relative flex items-center gap-2">
             <input
               type="file"
               accept="image/*,.pdf,.docx,.xlsx,.zip,.txt,.md,.markdown,.csv,.json,.jsonl,.js,.jsx,.ts,.tsx,.py,.java,.go,.rs,.php,.rb,.c,.cpp,.h,.hpp,.css,.scss,.html,.xml,.yaml,.yml,.toml,.ini,.env,.sql,.sh,.zsh,.log,text/*"
