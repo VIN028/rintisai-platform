@@ -28,7 +28,7 @@ export function welcomeEmail(name) {
       <h2 style="color:#6366f1">Welcome to RintisAI, ${name || "there"}!</h2>
       <p>Your free account is ready. Start chatting with AI models right away.</p>
       <a href="${process.env.NEXT_PUBLIC_URL || "http://localhost:3001"}" style="display:inline-block;background:#6366f1;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;margin-top:12px">Open RintisAI</a>
-      <p style="color:#9ca3af;font-size:13px;margin-top:24px">— RintisAI Team</p>
+      <p style="color:#9ca3af;font-size:13px;margin-top:24px">- RintisAI Team</p>
     </div>`,
   };
 }
@@ -57,7 +57,7 @@ export function resetCodeEmail(code, email) {
   const baseUrl = process.env.NEXT_PUBLIC_URL || "http://localhost:3001";
   const resetUrl = `${baseUrl}/reset?email=${encodeURIComponent(email || "")}`;
   return {
-    subject: "Password Reset Code — RintisAI",
+    subject: "Password Reset Code - RintisAI",
     html: `<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
       <h2 style="color:#6366f1">Reset Your Password</h2>
       <p>Use this code to reset your password:</p>
@@ -73,12 +73,12 @@ export function resetCodeEmail(code, email) {
 
 export function upgradeEmail(plan) {
   return {
-    subject: `Plan Activated — RintisAI ${plan} Plan`,
+    subject: `Plan Activated - RintisAI ${plan} Plan`,
     html: `<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
       <h2 style="color:#059669">Your ${plan} Plan is Active!</h2>
       <p>Your upgrade has been processed. Enjoy your new limits and features.</p>
       <a href="${process.env.NEXT_PUBLIC_URL || "http://localhost:3001"}" style="display:inline-block;background:#6366f1;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;margin-top:12px">Open RintisAI</a>
-      <p style="color:#9ca3af;font-size:13px;margin-top:24px">— RintisAI Team</p>
+      <p style="color:#9ca3af;font-size:13px;margin-top:24px">- RintisAI Team</p>
     </div>`,
   };
 }
@@ -87,7 +87,7 @@ export function adminUpgradeRequestEmail({ user, request, baseAmount, transferAm
   const baseUrl = process.env.NEXT_PUBLIC_URL || "http://localhost:3001";
   const type = request.plan === "api_topup" ? "API PAYG top-up" : request.plan === "topup" ? "Web usage top-up" : `${request.plan} ${request.billingInterval || "monthly"}`;
   return {
-    subject: `New payment request — ${type}`,
+    subject: `New payment request - ${type}`,
     html: `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:24px">
       <h2 style="color:#6366f1;margin-bottom:8px">New Payment Request</h2>
       <p style="color:#374151">A user submitted a new upgrade/top-up request.</p>

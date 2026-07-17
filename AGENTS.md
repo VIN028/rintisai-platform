@@ -1,7 +1,7 @@
 <!-- BEGIN:nextjs-agent-rules -->
 # This is NOT the Next.js you know
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
+This version has breaking changes - APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
 <!-- BEGIN:rintisai-dev-standards -->
@@ -30,6 +30,7 @@ Changelog Convention:
 
 Other Convention:
 - Always update any .md documents (prioritize README.md / CHANGELOG.md and AGENTS.md)
+- Use regular hyphen (-) for punctuation; never use Em Dash (—) or En Dash (–) in code or documentation
 
 Write in English, ensuring the commit description is clear and concise.
 

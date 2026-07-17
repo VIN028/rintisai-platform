@@ -3016,7 +3016,7 @@ export default function HomePage() {
                   handleSendMessage(e);
                 }
               }}
-              placeholder={limitExceeded || limitBlocked ? "Usage limit reached — upgrade to continue" : getModelConfig(selectedModel)?.vision ? "Type your message here... (Enter to send, paste images/files)" : "Type your message here... (Enter to send, attach files)"}
+              placeholder={limitExceeded || limitBlocked ? "Usage limit reached - upgrade to continue" : getModelConfig(selectedModel)?.vision ? "Type your message here... (Enter to send, paste images/files)" : "Type your message here... (Enter to send, attach files)"}
               rows={1}
               className="w-full glass-input pr-14 pl-5 py-4 rounded-2xl text-sm focus:outline-none resize-none overflow-y-hidden shadow-2xl shadow-black/45"
             />
@@ -3031,7 +3031,7 @@ export default function HomePage() {
             </button>
           </form>
           <p className="text-center text-[10px] text-gray-500 mt-3 font-medium uppercase tracking-wide">
-            RintisAI — Your AI Workspace
+            RintisAI - Your AI Workspace
           </p>
         </footer>
       </main>
@@ -3179,12 +3179,12 @@ export default function HomePage() {
                 <div className="p-4 rounded-xl bg-indigo-500/10 border border-indigo-500/20 mb-5 text-center">
                   <p className="text-xs text-gray-400 mb-2">Transfer exactly</p>
                   <p className="text-2xl font-black text-white">
-                    Rp {upgradeAmount?.toLocaleString("id-ID") || "—"}
+                    Rp {upgradeAmount?.toLocaleString("id-ID") || "-"}
                   </p>
                   <p className="text-xs text-gray-500 mt-2">
-                    Unique code: <span className="text-indigo-300 font-bold text-sm">{upgradeCode || "—"}</span>
+                    Unique code: <span className="text-indigo-300 font-bold text-sm">{upgradeCode || "-"}</span>
                   </p>
-                  <p className="text-[10px] text-gray-500 mt-1">This code identifies your payment — transfer the exact amount above.</p>
+                  <p className="text-[10px] text-gray-500 mt-1">This code identifies your payment - transfer the exact amount above.</p>
                 </div>
 
                 {upgradeError && <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">{upgradeError}</div>}
@@ -3278,7 +3278,7 @@ export default function HomePage() {
                   <p className="text-[11px] uppercase font-bold text-gray-400 tracking-wider mb-3">What happens next</p>
                   <div className="space-y-2.5 text-xs text-gray-400">
                     <p className="flex gap-2"><span className="text-emerald-400 font-bold shrink-0">1.</span> Admin reviews your payment proof and matches the unique code <span className="text-indigo-300 font-bold">{upgradeCode}</span>.</p>
-                    <p className="flex gap-2"><span className="text-emerald-400 font-bold shrink-0">2.</span> Once verified, your plan is activated — usually within 1-24 hours.</p>
+                    <p className="flex gap-2"><span className="text-emerald-400 font-bold shrink-0">2.</span> Once verified, your plan is activated - usually within 1-24 hours.</p>
                     <p className="flex gap-2"><span className="text-emerald-400 font-bold shrink-0">3.</span> You will be notified via WhatsApp when your plan is active.</p>
                   </div>
                 </div>

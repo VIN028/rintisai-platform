@@ -61,7 +61,7 @@ export async function authenticateUser(req, { requireActive = false } = {}) {
   if (!user) throw new AuthError("User not found", 401);
 
   if (decoded.tokenVersion !== undefined && decoded.tokenVersion !== user.tokenVersion) {
-    throw new AuthError("Session expired — please sign in again", 401);
+    throw new AuthError("Session expired - please sign in again", 401);
   }
 
   if (user.subscription) {

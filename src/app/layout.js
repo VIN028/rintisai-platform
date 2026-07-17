@@ -6,14 +6,14 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata = {
-  title: "RintisAI — AI Chat & Developer Tools",
+  title: "RintisAI - AI Chat & Developer Tools",
   description: "Multi-model AI platform with local API keys. Chat, code, and build with RintisAI.",
   icons: {
     icon: "/icon.svg",
     shortcut: "/icon.svg",
   },
   openGraph: {
-    title: "RintisAI — AI Chat & Developer Tools",
+    title: "RintisAI - AI Chat & Developer Tools",
     description: "Multi-model AI platform with local API keys. Chat, code, and build with RintisAI.",
     type: "website",
   },
