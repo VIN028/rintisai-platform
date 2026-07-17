@@ -5,85 +5,90 @@ This version has breaking changes — APIs, conventions, and file structure may 
 <!-- END:nextjs-agent-rules -->
 
 <!-- BEGIN:rintisai-dev-standards -->
-# RintisAI Development Standards
+RintisAI Development Standards
 
-## Branch Strategy
-- `main` — production-ready, deployed. Hanya merge via PR.
-- `dev` — integration branch untuk development daily.
-- Feature branches: `feat/<nama-fitur>`, bercabang dari `dev`.
-- Fix branches: `fix/<nama-fix>`, bercabang dari `dev`.
+Branch Strategy
+- main - production-ready, deployed. Merge strictly via PR only.
+- dev - integration branch for daily development.
+- Feature branches: feat/, branched from dev.
+- Fix branches: fix/, branched from dev.
 
-## Commit Convention
-Gunakan **Conventional Commits**:
-```
-feat: fitur baru
-fix: perbaikan bug
-chore: tugas maintenance (deps, config, dll)
-refactor: perubahan kode tanpa perubahan fungsionalitas
-style: perubahan formatting, whitespace (bukan logika)
-docs: perubahan dokumentasi
-test: penambahan/perbaikan test
-```
-Tulis dalam **Bahasa Inggris**, pastikan commit description jelas dan ringkas.
+Commit Convention
+Use Conventional Commits:
+- feat: new feature
+- fix: bug fix
+- chore: maintenance tasks (dependencies, config, etc.)
+- refactor: code changes without changing functionality
+- style: changes to formatting, whitespace (not logic)
+- docs: documentation changes
+- test: adding/improving tests
 
-## Code Conventions
+Changelog Convention:
+- Write in CHANGELOG.md
+- Write any updates in every commit made
+- Use YYYY-MM-DD v1 / v2 / v3 etc
 
-### File & Folder Naming
-- **kebab-case** untuk semua file dan direktori (kecuali `page.js`, `route.js`, `layout.js` yang merupakan konvensi Next.js).
-- API routes: `src/app/api/<kebab-case>/route.js`
-- Pages: `src/app/<kebab-case>/page.js`
-- Library: `src/lib/<kebab-case>.js`
+Other Convention:
+- Always update any .md documents (prioritize README.md / CHANGELOG.md and AGENTS.md)
 
-### Import Style
-- Gunakan `@/` alias (dari `jsconfig.json`).
-- **Named exports** untuk utilitas dan route handler.
-- **Default exports hanya** untuk page component.
-- Import langsung dari modul, tanpa barrel file.
+Write in English, ensuring the commit description is clear and concise.
 
-### API Routes
-```js
+Code Conventions
+
+File & Folder Naming
+- kebab-case for all files and directories (except page.js, route.js, layout.js which follow Next.js conventions).
+- API routes: src/app/api//route.js
+- Pages: src/app//page.js
+- Library: src/lib/.js
+
+Import Style
+- Use the @/ alias (configured in jsconfig.json).
+- Named exports for utilities and route handlers.
+- Default exports exclusively for page components.
+- Import directly from modules, avoiding barrel files.
+
+API Routes
 export async function GET(req) { ... }
 export async function POST(req) { ... }
-```
-- Parse body: `const body = await req.json().catch(() => ({}))`
-- Response: `NextResponse.json({ ... })` atau `new Response(stream, { headers })`
-- Error: `NextResponse.json({ error: "..." }, { status: 4xx })`
-- Bungkus handler dalam `try/catch`, kembalikan 500 di catch.
-- Gunakan `authenticateUser(req)` dari `@/lib/auth` untuk cookie auth, atau Bearer token untuk API key.
+- Parse body: const body = await req.json().catch(() => ({}))
+- Response: NextResponse.json({ ... }) or new Response(stream, { headers })
+- Error: NextResponse.json({ error: "..." }, { status: 4xx })
+- Wrap handlers in a try/catch block, returning a 500 status code in the catch block.
+- Use authenticateUser(req) from @/lib/auth for cookie authentication, or Bearer tokens for API keys.
 
-### Components (Pages)
-- **Server component** sebagai default (tanpa `"use client"`).
-- **Client component** hanya jika perlu interaktivitas/interactivity (gunakan `"use client"` di baris pertama).
-- Function declaration: `export default function ComponentName() { ... }`
-- Arrow function hanya untuk helpers di dalam file: `const helper = (...) => { ... }`
-- Tailwind CSS utility classes. Inline `style={{}}` diperbolehkan jika nilai dinamis.
+Components (Pages)
+- Server components by default (without "use client").
+- Client components only when interactivity is required (place "use client" on the very first line).
+- Function declaration: export default function ComponentName() { ... }
+- Arrow functions only for internal file helpers: const helper = (...) => { ... }
+- Tailwind CSS utility classes. Inline style={{}} is permitted only for dynamic values.
 
-### Naming Variabel
-- **camelCase**: variable, function, parameter.
-- **UPPER_SNAKE_CASE**: constants tingkat konfigurasi.
-- **snake_case**: plan/model IDs, field Prisma.
+Variable Naming
+- camelCase: variables, functions, parameters.
+- UPPER_SNAKE_CASE: configuration-level constants.
+- snake_case: plan/model IDs, Prisma fields.
 
-### Database (Prisma + SQLite)
-- Import client dari `@/lib/db`: `import prisma from "@/lib/db"`
+Database (Prisma + SQLite)
+- Import the client from @/lib/db: import prisma from "@/lib/db"
 - Field names: camelCase.
-- Jangan commit file `.db` atau `.sqlite` ke repository.
+- Do not commit .db or .sqlite files to the repository.
 
-### Error Handling
-- Setiap route handler dibungkus `try/catch`.
-- Log error server-side: `console.error("Label:", err)`
-- Jangan expose stack trace ke client.
+Error Handling
+- Every route handler must be wrapped in a try/catch block.
+- Log errors server-side: console.error("Label:", err)
+- Do not expose stack traces to the client.
 
-### Testing
-- E2E tests via Playwright: `npm run test:e2e`
-- Test file di direktori `tests/`.
+Testing
+- E2E tests via Playwright: npm run test:e2e
+- Place test files in the tests/ directory.
 
-### Linting & Build
-- Jalankan `npm run lint` sebelum commit.
-- Pastikan `npm run build` berhasil sebelum merge ke `dev`/`main`.
-- Model: **Next.js 16 + React 19** — baca docs di `node_modules/next/dist/docs/` jika ragu dengan API.
+Linting & Build
+- Run npm run lint before committing code.
+- Ensure npm run build succeeds before merging into dev or main.
+- Environment: Next.js 16 + React 19 - refer to the docs in node_modules/next/dist/docs/ if you are uncertain about any API.
 
-## Security
-- Jangan commit secrets, `.env`, atau file database lokal.
-- Gunakan environment variables untuk semua konfigurasi sensitif.
-- Ikuti security headers yang sudah ditetapkan di `next.config.mjs`.
+Security
+- Never commit secrets, .env files, or local database files.
+- Use environment variables for all sensitive configurations.
+- Adhere to the security headers specified in next.config.mjs.
 <!-- END:rintisai-dev-standards -->
