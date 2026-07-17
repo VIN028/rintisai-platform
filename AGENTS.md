@@ -88,6 +88,12 @@ Linting & Build
 - Ensure npm run build succeeds before merging into dev or main.
 - Environment: Next.js 16 + React 19 - refer to the docs in node_modules/next/dist/docs/ if you are uncertain about any API.
 
+Schema & Migration
+- Every Prisma schema change must be accompanied by a new migration: npx prisma migrate dev --name <descriptive_name>
+- After pulling new migrations from git, run: npx prisma migrate deploy
+- Keep prisma/seed.js in sync with the current schema at all times.
+- Run npm run seed after migrate deploy to reset demo/admin users.
+
 Security
 - Never commit secrets, .env files, or local database files.
 - Use environment variables for all sensitive configurations.
