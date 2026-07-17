@@ -1,11 +1,11 @@
 /** @type {import('next').NextConfig} */
 const contentSecurityPolicy = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
-  "connect-src 'self'",
+  "connect-src 'self' ws://localhost:3000 wss://*.echo.my.id",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -15,6 +15,7 @@ const contentSecurityPolicy = [
 
 const nextConfig = {
   poweredByHeader: false,
+  allowedDevOrigins: ['*.echo.my.id'],
   serverExternalPackages: ["@prisma/client", "@prisma/adapter-better-sqlite3", "better-sqlite3"],
   async headers() {
     return [
