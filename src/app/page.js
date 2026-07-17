@@ -1507,6 +1507,18 @@ export default function HomePage() {
     activeRequest.controller.abort();
   };
 
+  const handleChatWheel = (e) => {
+    const container = chatScrollRef.current;
+    if (!container || Math.abs(e.deltaY) < 1 || Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
+    if (e.target?.closest?.("textarea,input,select,button,[data-no-chat-wheel]")) return;
+    const maxScroll = container.scrollHeight - container.clientHeight;
+    if (maxScroll <= 0) return;
+    const nextScrollTop = Math.max(0, Math.min(maxScroll, container.scrollTop + e.deltaY));
+    if (nextScrollTop === container.scrollTop) return;
+    e.preventDefault();
+    container.scrollTop = nextScrollTop;
+  };
+
   // 2. Chat Streaming Submission Handler
   const handleSendMessage = async (e, overrideText = null) => {
     e?.preventDefault?.();
@@ -2586,7 +2598,7 @@ export default function HomePage() {
       </aside>
 
       {/* 💬 MAIN CHAT WORKSPACE AREA */}
-      <main className="flex-1 min-w-0 min-h-0 flex flex-col h-full relative">
+      <main className="flex-1 min-w-0 min-h-0 flex flex-col h-full relative" onWheelCapture={handleChatWheel}>
 
         {/* Top Header Bar */}
         <header className="min-h-14 sm:min-h-16 border-b border-white/5 flex flex-wrap items-center justify-between gap-2 px-3 py-2 sm:px-6 bg-slate-950/20 backdrop-blur-md z-10">
@@ -2715,7 +2727,7 @@ export default function HomePage() {
         )}
 
         {/* Messages Feed Viewport */}
-        <div ref={chatScrollRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 sm:p-5 lg:p-6 space-y-4 sm:space-y-6" style={{ WebkitOverflowScrolling: "touch" }}>
+        <div ref={chatScrollRef} className="chat-scroll-container flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 sm:p-5 lg:p-6 space-y-4 sm:space-y-6" style={{ WebkitOverflowScrolling: "touch", scrollbarGutter: "stable" }}>
           {limitExceeded || limitBlocked ? (
             <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-sm flex gap-3 items-start max-w-5xl mx-auto">
               <AlertTriangle size={18} className="shrink-0 mt-0.5" />

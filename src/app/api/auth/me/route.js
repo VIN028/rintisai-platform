@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { authenticateUser, AuthError, isEmailVerificationRequired } from "@/lib/auth";
 import { calculateClaudeOfficialCostUsdMicros, getManagedUsdIdrRate, idrToUsdMicros, isClaudeApiPlan, usdMicrosToIdr } from "@/lib/claude-payg";
-import { getPlanDefinition, getPlanLimit, getUsageWindowConfig, getUsageWindowStart, normalizeBillingInterval } from "@/lib/plans";
+import { getPlanDefinition, getPlanLimit, getUsageWindowConfig, getUsageWindowStart, isDiscontinuedPlan, normalizeBillingInterval } from "@/lib/plans";
 import { buildEntitlementUsageWindows, getUserEntitlements } from "@/lib/entitlements";
 import { expireSubscriptionIfNeeded } from "@/lib/subscription-expiry";
 
@@ -10,6 +10,7 @@ export function getActivePlan(subscription) {
   if (!subscription) return "free";
   if (subscription?.plan === "free" && !isEmailVerificationRequired()) return "free";
   if (subscription.status !== "active") return "inactive";
+  if (isDiscontinuedPlan(subscription.plan)) return "inactive";
   if (subscription.expiryDate && new Date() > new Date(subscription.expiryDate)) return "inactive";
   return getPlanDefinition(subscription.plan) ? subscription.plan : "inactive";
 }

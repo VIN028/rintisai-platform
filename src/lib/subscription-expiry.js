@@ -1,5 +1,5 @@
 import prisma from "@/lib/db";
-import { getPlanDefinition, isApiPlan, normalizeBillingInterval } from "@/lib/plans";
+import { getPlanDefinition, isApiPlan, isDiscontinuedPlan, normalizeBillingInterval } from "@/lib/plans";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -36,7 +36,7 @@ export function buildFreeSubscriptionData(now = new Date()) {
 
 export async function expireSubscriptionIfNeeded(subscription, now = new Date()) {
   if (!subscription) return subscription;
-  const paidPlanExpired = subscription.plan !== "free" && (subscription.status === "expired" || (subscription.status === "active" && isSubscriptionExpired(subscription, now)));
+  const paidPlanExpired = subscription.plan !== "free" && (isDiscontinuedPlan(subscription.plan) || subscription.status === "expired" || (subscription.status === "active" && isSubscriptionExpired(subscription, now)));
   if (!paidPlanExpired) return subscription;
   const updated = await prisma.subscription.update({
     where: { id: subscription.id },
@@ -78,5 +78,5 @@ export function normalizeStatusForExpiry(status, expiryDate, now = new Date()) {
 
 export function shouldDowngradeToFree({ plan, status, expiryDate, now = new Date() } = {}) {
   if (!plan || plan === "free") return false;
-  return status === "expired" || (status === "active" && expiryDate && new Date(expiryDate) <= now);
+  return isDiscontinuedPlan(plan) || status === "expired" || (status === "active" && expiryDate && new Date(expiryDate) <= now);
 }

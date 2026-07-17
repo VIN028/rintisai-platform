@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import prisma from "@/lib/db";
-import { getPlanDefinition, getPlanLimit, getUsageWindowConfig, normalizeBillingInterval } from "@/lib/plans";
+import { getPlanDefinition, getPlanLimit, getUsageWindowConfig, isDiscontinuedPlan, normalizeBillingInterval } from "@/lib/plans";
 import { getModelFamily, isModelAllowedForPlan } from "@/lib/models";
 import { buildFreeSubscriptionData } from "@/lib/subscription-expiry";
 
@@ -176,7 +176,7 @@ async function insertEntitlement({ userId, plan, billingInterval, startsAt, expi
 }
 
 async function seedLegacyEntitlement(userId, subscription) {
-  if (!subscription || !isStackablePlan(subscription.plan)) return null;
+  if (!subscription || isDiscontinuedPlan(subscription.plan) || !isStackablePlan(subscription.plan)) return null;
   const startsAt = subscription.updatedAt || subscription.createdAt || new Date();
   const intervalExpiry = addDays(toDate(startsAt), intervalDays(subscription.billingInterval));
   const requestedExpiry = subscription.expiryDate ? toDate(subscription.expiryDate) : intervalExpiry;
@@ -269,7 +269,7 @@ export async function activatePlanEntitlement({ userId, plan, billingInterval, s
 export async function syncSubscriptionSummaryFromEntitlements({ userId, preferredEntitlement = null }) {
   const entitlements = await getUserEntitlements(userId, null);
   const now = new Date();
-  const currentOrFuture = entitlements.filter((item) => item.status !== "cancelled" && toDate(item.expiresAt) > now);
+  const currentOrFuture = entitlements.filter((item) => !isDiscontinuedPlan(item.plan) && item.status !== "cancelled" && toDate(item.expiresAt) > now);
   if (currentOrFuture.length === 0) {
     return prisma.subscription.upsert({
       where: { userId },
@@ -326,6 +326,7 @@ export async function getEntitlementUsageUnits({ userId, entitlement }) {
 export async function buildEntitlementUsageWindows({ userId, entitlements }) {
   const summaries = [];
   for (const entitlement of entitlements || []) {
+    if (isDiscontinuedPlan(entitlement.plan)) continue;
     if (!["active", "queued"].includes(entitlement.status)) continue;
     const limits = getEntitlementLimits(entitlement);
     if (!limits) continue;
