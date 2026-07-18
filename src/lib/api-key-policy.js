@@ -52,10 +52,7 @@ export async function ensureApiKeyMetadataColumns() {
 
 export async function getApiKeyMetadata(keyId) {
   await ensureApiKeyMetadataColumns();
-  const rows = await prisma.$queryRawUnsafe(
-    'SELECT id, providerScope, quotaUsdMicros, status FROM "ApiKey" WHERE id = ?',
-    keyId,
-  ).catch(() => []);
+  const rows = await prisma.$queryRaw`SELECT id, providerScope, quotaUsdMicros, status FROM "ApiKey" WHERE id = ${keyId}`.catch(() => []);
   const row = rows?.[0] || {};
   return {
     providerScope: normalizeApiKeyScope(row.providerScope),

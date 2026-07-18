@@ -26,10 +26,7 @@ async function getSettings() {
 }
 
 async function setSetting(key, value) {
-  await prisma.$executeRawUnsafe(
-    'INSERT INTO "Setting" (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = ?',
-    key, value, value,
-  );
+  await prisma.$executeRaw`INSERT INTO "Setting" (key, value) VALUES (${key}, ${value}) ON CONFLICT (key) DO UPDATE SET value = ${value}`;
 }
 
 export async function GET(req) {

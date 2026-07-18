@@ -91,10 +91,7 @@ function normalizeRow(row, now = new Date()) {
 
 async function fetchRawEntitlements(userId) {
   await ensureEntitlementSchema();
-  return prisma.$queryRawUnsafe(
-    'SELECT * FROM "PlanEntitlement" WHERE "userId" = ? ORDER BY "startsAt" ASC, "createdAt" ASC',
-    userId,
-  );
+  return prisma.$queryRaw`SELECT * FROM "PlanEntitlement" WHERE "userId" = ${userId} ORDER BY "startsAt" ASC, "createdAt" ASC`;
 }
 
 async function backfillLegacyUsage({ userId, packageId, family, startsAt, expiresAt }) {
@@ -103,14 +100,7 @@ async function backfillLegacyUsage({ userId, packageId, family, startsAt, expire
   if (family === "claude") likePattern = "claude-%";
   if (family === "grok") likePattern = "grok-%";
   if (!likePattern) return;
-  await prisma.$executeRawUnsafe(
-    'UPDATE "TokenUsage" SET "packageId" = ? WHERE "userId" = ? AND "packageId" IS NULL AND "timestamp" >= ? AND "timestamp" < ? AND "modelUsed" LIKE ?',
-    packageId,
-    userId,
-    toIso(startsAt),
-    toIso(expiresAt),
-    likePattern,
-  ).catch(() => null);
+  await prisma.$executeRaw`UPDATE "TokenUsage" SET "packageId" = ${packageId} WHERE "userId" = ${userId} AND "packageId" IS NULL AND "timestamp" >= ${toIso(startsAt)} AND "timestamp" < ${toIso(expiresAt)} AND "modelUsed" LIKE ${likePattern}`.catch(() => null);
 }
 
 async function insertEntitlement({ userId, plan, billingInterval, startsAt, expiresAt, sourceRequestId = null, status = "active", limitUnits = null }) {
@@ -122,22 +112,7 @@ async function insertEntitlement({ userId, plan, billingInterval, startsAt, expi
   const now = new Date();
   const activatedAt = toDate(startsAt) <= now ? now : null;
   const snapshotLimit = Number.isFinite(Number(limitUnits)) ? Math.round(Number(limitUnits)) : getPlanDefaultLimit(plan, billingInterval);
-  await prisma.$executeRawUnsafe(
-    'INSERT INTO "PlanEntitlement" ("id", "userId", "plan", "family", "billingInterval", "status", "startsAt", "expiresAt", "activatedAt", "sourceRequestId", "limitUnits", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    id,
-    userId,
-    plan,
-    family,
-    normalizeBillingInterval(billingInterval),
-    status,
-    toIso(startsAt),
-    toIso(expiresAt),
-    activatedAt ? activatedAt.toISOString() : null,
-    sourceRequestId,
-    snapshotLimit,
-    now.toISOString(),
-    now.toISOString(),
-  );
+  await prisma.$executeRaw`INSERT INTO "PlanEntitlement" ("id", "userId", "plan", "family", "billingInterval", "status", "startsAt", "expiresAt", "activatedAt", "sourceRequestId", "limitUnits", "createdAt", "updatedAt") VALUES (${id}, ${userId}, ${plan}, ${family}, ${normalizeBillingInterval(billingInterval)}, ${status}, ${toIso(startsAt)}, ${toIso(expiresAt)}, ${activatedAt ? activatedAt.toISOString() : null}, ${sourceRequestId}, ${snapshotLimit}, ${now.toISOString()}, ${now.toISOString()})`;
   return normalizeRow({ id, userId, plan, family, billingInterval, status, startsAt, expiresAt, activatedAt, limitUnits: snapshotLimit, sourceRequestId, createdAt: now, updatedAt: now });
 }
 
@@ -279,13 +254,7 @@ export async function syncSubscriptionSummaryFromEntitlements({ userId, preferre
 export async function getEntitlementUsageUnits({ userId, entitlement }) {
   if (!entitlement?.id) return 0;
   await ensureEntitlementSchema();
-  const rows = await prisma.$queryRawUnsafe(
-    'SELECT COALESCE(SUM("totalTokens"), 0) as total FROM "TokenUsage" WHERE "userId" = ? AND "packageId" = ? AND "timestamp" >= ? AND "timestamp" < ?',
-    userId,
-    entitlement.id,
-    toIso(entitlement.startsAt),
-    toIso(entitlement.expiresAt),
-  );
+  const rows = await prisma.$queryRaw`SELECT COALESCE(SUM("totalTokens"), 0) as total FROM "TokenUsage" WHERE "userId" = ${userId} AND "packageId" = ${entitlement.id} AND "timestamp" >= ${toIso(entitlement.startsAt)} AND "timestamp" < ${toIso(entitlement.expiresAt)}`;
   return Number(rows?.[0]?.total || 0);
 }
 
@@ -326,11 +295,6 @@ export async function addActiveEntitlementLimitUnits({ userId, family, amount, s
   if (!active) return null;
   const currentLimit = getEntitlementLimits(active)?.limit || 0;
   const nextLimit = currentLimit + extra;
-  await prisma.$executeRawUnsafe(
-    'UPDATE "PlanEntitlement" SET "limitUnits" = ?, "updatedAt" = ? WHERE "id" = ?',
-    nextLimit,
-    new Date().toISOString(),
-    active.id,
-  );
+  await prisma.$executeRaw`UPDATE "PlanEntitlement" SET "limitUnits" = ${nextLimit}, "updatedAt" = ${new Date().toISOString()} WHERE "id" = ${active.id}`;
   return { ...active, limitUnits: nextLimit };
 }

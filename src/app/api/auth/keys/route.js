@@ -18,10 +18,7 @@ export async function GET(req) {
     }
 
     await ensureApiKeyMetadataColumns();
-    const keys = await prisma.$queryRawUnsafe(
-      "SELECT id, key, name, providerScope, quotaUsdMicros, status, createdAt, CASE WHEN encryptedKey IS NOT NULL AND encryptedKey != '' THEN 1 ELSE 0 END as canCopyFull FROM \"ApiKey\" WHERE userId = ? ORDER BY createdAt DESC",
-      user.id,
-    );
+    const keys = await prisma.$queryRaw`SELECT id, key, name, providerScope, quotaUsdMicros, status, createdAt, CASE WHEN encryptedKey IS NOT NULL AND encryptedKey != '' THEN 1 ELSE 0 END as canCopyFull FROM "ApiKey" WHERE "userId" = ${user.id} ORDER BY "createdAt" DESC`;
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -79,8 +76,8 @@ export async function POST(req) {
         userId: user.id,
       },
     });
-    await prisma.$executeRawUnsafe('UPDATE "ApiKey" SET encryptedKey = ? WHERE id = ?', encryptApiKey(secureKey), newKey.id);
-    await prisma.$executeRawUnsafe('UPDATE "ApiKey" SET providerScope = ?, quotaUsdMicros = ?, status = ? WHERE id = ?', providerScope, quotaUsdMicros, "active", newKey.id);
+    await prisma.$executeRaw`UPDATE "ApiKey" SET "encryptedKey" = ${encryptApiKey(secureKey)} WHERE "id" = ${newKey.id}`;
+    await prisma.$executeRaw`UPDATE "ApiKey" SET "providerScope" = ${providerScope}, "quotaUsdMicros" = ${quotaUsdMicros}, "status" = ${"active"} WHERE "id" = ${newKey.id}`;
 
     return NextResponse.json({
       message: "API Key berhasil dibuat.",
@@ -119,7 +116,7 @@ export async function PATCH(req) {
       return NextResponse.json({ error: "Parameter keyId wajib dilampirkan." }, { status: 400 });
     }
 
-    const rows = await prisma.$queryRawUnsafe('SELECT id, userId, encryptedKey FROM "ApiKey" WHERE id = ?', keyId);
+    const rows = await prisma.$queryRaw`SELECT id, "userId", "encryptedKey" FROM "ApiKey" WHERE "id" = ${keyId}`;
     const keyRecord = rows?.[0];
     if (!keyRecord || keyRecord.userId !== user.id) {
       return NextResponse.json({ error: "API Key tidak ditemukan atau Anda tidak memiliki akses." }, { status: 404 });
@@ -134,21 +131,14 @@ export async function PATCH(req) {
       }
       const quotaUsdMicros = normalizeQuotaUsdMicros(body.quotaUsdMicros ?? Math.floor((Number(body.quotaUsd) || 0) * 1_000_000));
       const status = normalizeApiKeyStatus(body.status);
-      await prisma.$executeRawUnsafe(
-        'UPDATE "ApiKey" SET name = COALESCE(?, name), providerScope = ?, quotaUsdMicros = ?, status = ? WHERE id = ?',
-        name || null,
-        providerScope,
-        quotaUsdMicros,
-        status,
-        keyId,
-      );
+      await prisma.$executeRaw`UPDATE "ApiKey" SET "name" = COALESCE(${name || null}, "name"), "providerScope" = ${providerScope}, "quotaUsdMicros" = ${quotaUsdMicros}, "status" = ${status} WHERE "id" = ${keyId}`;
       return NextResponse.json({ message: "API key updated." });
     }
 
     if (action === "toggle") {
       await ensureApiKeyMetadataColumns();
       const status = normalizeApiKeyStatus(body.status);
-      await prisma.$executeRawUnsafe('UPDATE "ApiKey" SET status = ? WHERE id = ?', status, keyId);
+      await prisma.$executeRaw`UPDATE "ApiKey" SET "status" = ${status} WHERE "id" = ${keyId}`;
       return NextResponse.json({ message: `API key ${status}.` });
     }
 

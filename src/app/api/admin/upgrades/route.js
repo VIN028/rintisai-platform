@@ -53,9 +53,7 @@ export async function GET(req) {
         orderBy: { createdAt: "desc" },
         take: 50,
       })
-      : await prisma.$queryRawUnsafe(
-        'SELECT r.*, u.email as "user.email", u.name as "user.name" FROM "UpgradeRequest" r LEFT JOIN "User" u ON u.id = r."userId" ORDER BY r."createdAt" DESC LIMIT 50',
-      ).then((rows) =>
+      : await prisma.$queryRaw`SELECT r.*, u.email as "user.email", u.name as "user.name" FROM "UpgradeRequest" r LEFT JOIN "User" u ON u.id = r."userId" ORDER BY r."createdAt" DESC LIMIT 50`.then((rows) =>
         rows.map((row) => ({
           ...row,
           user: { email: row["user.email"], name: row["user.name"] },
@@ -84,10 +82,7 @@ export async function PATCH(req) {
         include: { user: { include: { subscription: true } } },
       });
     } else {
-      const rows = await prisma.$queryRawUnsafe(
-        'SELECT * FROM "UpgradeRequest" WHERE id = ?',
-        requestId,
-      );
+      const rows = await prisma.$queryRaw`SELECT * FROM "UpgradeRequest" WHERE "id" = ${requestId}`;
       if (rows[0]) {
         const user = await prisma.user.findUnique({
           where: { id: rows[0].userId },
@@ -192,7 +187,7 @@ export async function PATCH(req) {
     const updated = prisma.upgradeRequest
       ? await prisma.upgradeRequest.update({ where: { id: requestId }, data: actionData })
       : await (async () => {
-        await prisma.$executeRawUnsafe('UPDATE "UpgradeRequest" SET status = ? WHERE id = ?', status, requestId);
+        await prisma.$executeRaw`UPDATE "UpgradeRequest" SET "status" = ${status} WHERE "id" = ${requestId}`;
         return { id: requestId, status };
       })();
 
