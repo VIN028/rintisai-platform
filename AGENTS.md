@@ -93,6 +93,9 @@ Schema & Migration
 - After pulling new migrations from git, run: npx prisma migrate deploy
 - Keep prisma/seed.js in sync with the current schema at all times.
 - Run npm run seed after migrate deploy to reset demo/admin users.
+- Data migration between providers (e.g. SQLite to PostgreSQL) must be documented in MIGRATION.md.
+- Migration scripts live in the scripts/ directory and use Prisma's dual-adapter pattern.
+- Always verify row counts after data migration before cutting over to the new database.
 
 Security
 - Never commit secrets, .env files, or local database files.

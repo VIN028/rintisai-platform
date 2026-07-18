@@ -42,3 +42,12 @@
 - Add PlanEntitlement model and missing indexes to Prisma schema (migration: add_plan_entitlement_and_indexes)
 - Remove runtime DDL (CREATE TABLE/ALTER TABLE) from entitlements.js and api-key-policy.js
 - Convert all raw SQL ? placeholders to $queryRaw/$executeRaw tagged templates (29 queries across 9 files)
+
+2026-07-18 v6
+
+- Add MIGRATION.md with SQLite to PostgreSQL data migration guide
+- Add data migration standards to AGENTS.md (dual-adapter pattern, row count verification)
+- Write scripts/migrate-from-sqlite.mjs with full dual-adapter migration script
+  - Auto-detects optional tables/columns (PlanEntitlement, TokenUsage.packageId)
+  - Inserts in dependency order, skips duplicates, handles FK orphans
+  - Includes verify() function for row count checks
