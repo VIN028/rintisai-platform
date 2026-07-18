@@ -105,11 +105,13 @@ export async function PATCH(req, { params }) {
       if (!normalizedEmail) {
         return NextResponse.json({ error: "Email tidak valid." }, { status: 400 });
       }
-      const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
-      if (existing && existing.id !== id) {
-        return NextResponse.json({ error: "Email sudah digunakan user lain." }, { status: 409 });
+      if (normalizedEmail !== user.email) {
+        const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+        if (existing) {
+          return NextResponse.json({ error: "Email sudah digunakan user lain." }, { status: 409 });
+        }
+        data.email = normalizedEmail;
       }
-      data.email = normalizedEmail;
     }
 
     if (disabled !== undefined) {
@@ -120,6 +122,10 @@ export async function PATCH(req, { params }) {
         }
       }
       data.disabled = Boolean(disabled);
+    }
+
+    if (Object.keys(data).length === 0) {
+      return NextResponse.json({ message: "Tidak ada perubahan.", user: { id: user.id, email: user.email, name: user.name, role: user.role, disabled: user.disabled } });
     }
 
     const updated = await prisma.user.update({
@@ -133,6 +139,7 @@ export async function PATCH(req, { params }) {
 
     return NextResponse.json({ message: "User berhasil diperbarui.", user: updated });
   } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 403 });
+    console.error("PATCH /api/admin/users/[id] error:", err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
