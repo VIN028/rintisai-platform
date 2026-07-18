@@ -63,3 +63,10 @@
 - Add `disabled` field to GET /api/admin/users and GET /api/admin/users/[id] responses
 - Add disable/enable actions to /api/admin/bulk (bulk disable/enable users)
   - Prevents bulk-disabling all admins
+
+2026-07-19 v8
+
+- Add disabled badge and "New User" button + modal to admin users list page
+- Add name, email, and disabled toggle inputs to user detail page
+- Save now calls PATCH /api/admin/users (subscription) + PATCH /api/admin/users/[id] (user fields) in parallel
+- Add bulk disable/enable buttons to the list page action bar

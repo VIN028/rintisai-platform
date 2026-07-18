@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, KeyRound, Key, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, KeyRound, Save, Trash2 } from "lucide-react";
 
 const F = (v) => Number(v || 0).toLocaleString("id-ID");
 const API_PLAN_KEYS = new Set(["api_gpt", "api_claude", "claude_api"]);
@@ -78,8 +78,16 @@ export default function AdminUserDetailPage() {
   const fetchData = () => {
     fetch(`/api/admin/users/${id}`).then(r => r.json()).then(d => {
       setData(d);
-      if (d.subscription) {
+      if (d.user) {
         setDraft({
+          userName: d.user.name || "",
+          userEmail: d.user.email || "",
+          userDisabled: Boolean(d.user.disabled),
+        });
+      }
+      if (d.subscription) {
+        setDraft((prev) => ({
+          ...prev,
           plan: d.subscription.plan || "free",
           billingInterval: d.subscription.billingInterval || "monthly",
           status: d.subscription.status || "inactive",
@@ -88,7 +96,7 @@ export default function AdminUserDetailPage() {
           customLimit5h: d.subscription.customLimit5h ?? "",
           customLimitWeekly: d.subscription.customLimitWeekly ?? "",
           customLimitMonthly: d.subscription.customLimitMonthly ?? "",
-        });
+        }));
       }
       setLoading(false);
     });
@@ -99,11 +107,43 @@ export default function AdminUserDetailPage() {
   const save = async () => {
     setSaving(true); setMsg("");
     try {
-      const r = await fetch("/api/admin/users", { method: "PATCH", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ userId: id, ...draft }) });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error);
-      setMsg("Saved.");
-      fetchData();
+      const results = await Promise.allSettled([
+        fetch("/api/admin/users", {
+          method: "PATCH",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({
+            userId: id,
+            plan: draft.plan,
+            billingInterval: draft.billingInterval,
+            status: draft.status,
+            expiryDate: draft.expiryDate,
+            apiAccessEnabled: draft.apiAccessEnabled,
+            customLimit5h: draft.customLimit5h,
+            customLimitWeekly: draft.customLimitWeekly,
+            customLimitMonthly: draft.customLimitMonthly,
+          }),
+        }),
+        fetch(`/api/admin/users/${id}`, {
+          method: "PATCH",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({
+            name: draft.userName || null,
+            email: draft.userEmail,
+            disabled: draft.userDisabled,
+          }),
+        }),
+      ]);
+
+      const errors = results
+        .map((r, i) => { if (r.status === "rejected") return `Request ${i}: ${r.reason}`; if (!r.value.ok) return `Request ${i}: ${r.value.status}`; return null; })
+        .filter(Boolean);
+
+      if (errors.length > 0) {
+        setMsg("Error: " + errors.join("; "));
+      } else {
+        setMsg("Saved.");
+        fetchData();
+      }
     } catch (e) { setMsg("Error: " + e.message); }
     finally { setSaving(false); }
   };
@@ -200,7 +240,12 @@ export default function AdminUserDetailPage() {
 
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-black text-white">{user.name || "Unnamed"}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-black text-white">{user.name || "Unnamed"}</h1>
+            {user.disabled && (
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 font-semibold">Disabled</span>
+            )}
+          </div>
           <p className="text-sm text-gray-400 font-mono">{user.email}</p>
           <div className="flex items-center gap-3 mt-2 text-[11px] text-gray-500">
             <span>Role: {user.role}</span>
@@ -240,16 +285,20 @@ export default function AdminUserDetailPage() {
         </div>
 
         <div className="rounded-2xl bg-white/[0.02] border border-white/5 p-4">
-          <h3 className="font-bold text-white text-sm mb-3">Recent Conversations</h3>
-          <div className="space-y-2">
-            {(conversations || []).length === 0 ? (
-              <p className="text-xs text-gray-500">No conversations yet.</p>
-            ) : conversations.map((c) => (
-              <div key={c.id} className="rounded-lg bg-black/20 p-2 text-xs">
-                <div className="truncate text-gray-300 font-medium">{c.title}</div>
-                <div className="text-gray-600 mt-0.5">{new Date(c.updatedAt).toLocaleDateString()}</div>
-              </div>
-            ))}
+          <h3 className="font-bold text-white text-sm mb-3">Account Info</h3>
+          <div className="space-y-3">
+            <Field label="Name">
+              <input type="text" value={draft.userName ?? ""} onChange={e => setDraft({...draft, userName: e.target.value})} placeholder="Full name" className="glass-input rounded-lg px-3 py-2 text-sm w-full" />
+            </Field>
+            <Field label="Email">
+              <input type="email" value={draft.userEmail ?? ""} onChange={e => setDraft({...draft, userEmail: e.target.value})} placeholder="user@example.com" className="glass-input rounded-lg px-3 py-2 text-sm w-full" />
+            </Field>
+            <Field label="Account Status">
+              <label className="flex h-[38px] items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/5 text-sm text-gray-300 cursor-pointer">
+                <input type="checkbox" checked={!draft.userDisabled} onChange={e => setDraft({...draft, userDisabled: !e.target.checked})} />
+                {draft.userDisabled ? "Disabled" : "Active"}
+              </label>
+            </Field>
           </div>
         </div>
       </div>
