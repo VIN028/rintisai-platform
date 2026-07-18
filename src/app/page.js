@@ -2840,7 +2840,7 @@ export default function HomePage() {
                             ))}
                           </div>
                         )}
-                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                        <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                       </div>
                     ) : (
                       msg.content === "" && activeChatBusy && index === messages.length - 1 ? (
@@ -2871,7 +2871,7 @@ export default function HomePage() {
                             <Copy size={13} />{copiedResponseIndex === index ? "Copied" : "Copy"}
                           </button>
                           <div
-                            className="message-content"
+                            className="message-content break-words"
                             onClick={handleMessageContentClick}
                             dangerouslySetInnerHTML={{ __html: formatMessageContent(msg.content) }}
                           />
