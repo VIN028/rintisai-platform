@@ -77,6 +77,13 @@ export async function POST(req) {
       );
     }
 
+    if (user.disabled) {
+      return NextResponse.json(
+        { error: "Akun Anda telah dinonaktifkan. Hubungi admin." },
+        { status: 403 }
+      );
+    }
+
     // Clear failed attempts on successful login
     failedLoginMap.delete(normalizedEmail);
 

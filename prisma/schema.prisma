@@ -15,14 +15,15 @@ model User {
   password       String
   name           String?
   role           String         @default("USER") // USER | ADMIN
+  disabled       Boolean        @default(false)
   assignedApiKey    String?
   resetCode      String?
   resetCodeExpires DateTime?
   emailVerifiedAt DateTime?
   emailVerifyToken String?
   emailVerifyExpires DateTime?
-  tokenVersion   Int       @default(0)
-  createdAt         DateTime       @default(now())
+  tokenVersion   Int            @default(0)
+  createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   subscription   Subscription?
   tokenUsages    TokenUsage[]

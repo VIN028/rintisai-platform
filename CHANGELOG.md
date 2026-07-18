@@ -51,3 +51,15 @@
   - Auto-detects optional tables/columns (PlanEntitlement, TokenUsage.packageId)
   - Inserts in dependency order, skips duplicates, handles FK orphans
   - Includes verify() function for row count checks
+
+2026-07-19 v7
+
+- Add `disabled` field to User model (Boolean @default(false)) with migration
+- Block disabled users from logging in (login/route.js returns 403)
+- Add POST /api/admin/users to create users by admin (auto-generates password if not provided)
+- Add PATCH /api/admin/users/[id] to edit user email, name, and toggle disabled status
+  - Prevents disabling the last active admin
+  - Validates email uniqueness across users
+- Add `disabled` field to GET /api/admin/users and GET /api/admin/users/[id] responses
+- Add disable/enable actions to /api/admin/bulk (bulk disable/enable users)
+  - Prevents bulk-disabling all admins
