@@ -27,7 +27,7 @@ async function getSettings() {
 
 async function setSetting(key, value) {
   await prisma.$executeRawUnsafe(
-    'INSERT INTO "Setting" (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?',
+    'INSERT INTO "Setting" (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = ?',
     key, value, value,
   );
 }

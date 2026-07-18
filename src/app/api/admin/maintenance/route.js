@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
+import { execSync } from "child_process";
 import prisma from "@/lib/db";
 import { authenticateAdmin } from "@/lib/auth";
 
 export const runtime = "nodejs";
+
+const isPostgres = () =>
+  process.env.DATABASE_URL?.startsWith("postgresql://") || process.env.DATABASE_URL?.startsWith("postgres://");
 
 function getDbPath() {
   const url = process.env.DATABASE_URL || "file:./dev.db";
@@ -37,8 +41,10 @@ async function getCounts() {
 function listBackups() {
   const dir = getBackupDir();
   if (!fs.existsSync(dir)) return [];
+
+  const ext = isPostgres() ? ".sql" : ".db";
   return fs.readdirSync(dir)
-    .filter((name) => name.endsWith(".db"))
+    .filter((name) => name.endsWith(ext))
     .map((name) => {
       const filePath = path.join(dir, name);
       const stat = fs.statSync(filePath);
@@ -55,13 +61,22 @@ function listBackups() {
 export async function GET(req) {
   try {
     await authenticateAdmin(req);
-    const dbPath = getDbPath();
-    const dbSize = dbPath && fs.existsSync(dbPath) ? fs.statSync(dbPath).size : 0;
+
+    let dbPath = null;
+    let dbSize = 0;
+
+    if (isPostgres()) {
+      const r = await prisma.$queryRawUnsafe("SELECT pg_database_size(current_database()) as size");
+      dbSize = Number(r[0]?.size || 0);
+    } else {
+      dbPath = getDbPath();
+      dbSize = dbPath && fs.existsSync(dbPath) ? fs.statSync(dbPath).size : 0;
+    }
 
     return NextResponse.json({
       counts: await getCounts(),
       database: {
-        path: dbPath,
+        path: dbPath || (isPostgres() ? "postgresql://..." : null),
         sizeMB: Math.round((dbSize / 1024 / 1024) * 100) / 100,
       },
       backups: listBackups(),
@@ -78,21 +93,32 @@ export async function POST(req) {
     const { action, email, confirmEmail } = body;
 
     if (action === "backup") {
+      const dir = getBackupDir();
+      fs.mkdirSync(dir, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+
+      if (isPostgres()) {
+        const backupName = `rintisai-${stamp}.sql`;
+        const dbUrl = process.env.DATABASE_URL;
+        execSync(`pg_dump "${dbUrl}" > "${path.join(dir, backupName)}"`, { stdio: "pipe" });
+        return NextResponse.json({ message: "PostgreSQL dump created.", backup: backupName });
+      }
+
       const dbPath = getDbPath();
       if (!dbPath || !fs.existsSync(dbPath)) {
         return NextResponse.json({ error: "SQLite database file not found." }, { status: 500 });
       }
-
-      const dir = getBackupDir();
-      fs.mkdirSync(dir, { recursive: true });
-      const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
       const backupName = `dev-${stamp}.db`;
       fs.copyFileSync(dbPath, path.join(dir, backupName));
       return NextResponse.json({ message: "Database backup created.", backup: backupName });
     }
 
     if (action === "vacuum") {
-      await prisma.$executeRawUnsafe("VACUUM");
+      if (isPostgres()) {
+        await prisma.$queryRawUnsafe("VACUUM");
+      } else {
+        await prisma.$executeRawUnsafe("VACUUM");
+      }
       return NextResponse.json({ message: "Database vacuum completed." });
     }
 

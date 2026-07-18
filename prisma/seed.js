@@ -1,18 +1,27 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
-import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 import path from 'path';
+import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
+
+function createClient() {
+  const url = process.env.DATABASE_URL || `file:${path.resolve(process.cwd(), 'dev.db')}`;
+
+  if (url.startsWith('postgresql://') || url.startsWith('postgres://')) {
+    const { PrismaPg } = require('@prisma/adapter-pg');
+    return new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
+  }
+
+  const { PrismaBetterSqlite3 } = require('@prisma/adapter-better-sqlite3');
+  return new PrismaClient({ adapter: new PrismaBetterSqlite3({ url }) });
+}
 
 async function main() {
-  const dbUrl = `file:${path.resolve(process.cwd(), 'dev.db')}`;
-  const adapter = new PrismaBetterSqlite3({ url: dbUrl });
-  const prisma = new PrismaClient({ adapter });
+  const prisma = createClient();
 
   const adminEmail = process.env.SEED_ADMIN_EMAIL || "admin@example.com";
   const adminPassword = process.env.SEED_ADMIN_PASSWORD || crypto.randomBytes(12).toString("hex");

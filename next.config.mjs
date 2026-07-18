@@ -16,7 +16,7 @@ const contentSecurityPolicy = [
 const nextConfig = {
   poweredByHeader: false,
   allowedDevOrigins: ['*.echo.my.id'],
-  serverExternalPackages: ["@prisma/client", "@prisma/adapter-better-sqlite3", "better-sqlite3"],
+  serverExternalPackages: ["@prisma/client", "@prisma/adapter-better-sqlite3", "@prisma/adapter-pg", "better-sqlite3", "pg"],
   async headers() {
     return [
       {
