@@ -31,6 +31,7 @@ model User {
   upgradeRequests UpgradeRequest[]
   apiCreditLedger ApiCreditLedger[]
   cashoutRequests CashoutRequest[]
+  planEntitlements PlanEntitlement[]
 }
 
 model ApiKey {
@@ -77,6 +78,11 @@ model TokenUsage {
   apiKeyId         String?
   providerPool     String?
   fallbackUsed     Boolean  @default(false)
+  packageId        String?
+
+  @@index([userId, timestamp])
+  @@index([modelUsed])
+  @@index([packageId, timestamp])
 }
 
 model ApiCreditLedger {
@@ -95,6 +101,8 @@ model ApiCreditLedger {
   fallbackUsed     Boolean  @default(false)
   note             String?
   createdAt        DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
 
 model Conversation {
@@ -106,6 +114,8 @@ model Conversation {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   messages  Message[]
+
+  @@index([userId])
 }
 
 model Message {
@@ -115,6 +125,8 @@ model Message {
   role           String       // user | assistant
   content        String
   createdAt      DateTime     @default(now())
+
+  @@index([conversationId])
 }
 
 model UpgradeRequest {
@@ -136,6 +148,8 @@ model UpgradeRequest {
   completedAt   DateTime?
   rejectedAt    DateTime?
   createdAt     DateTime @default(now())
+
+  @@index([userId, status])
 }
 
 model CashoutRequest {
@@ -157,6 +171,27 @@ model CashoutRequest {
   completedAt     DateTime?
   rejectedAt      DateTime?
   createdAt       DateTime @default(now())
+}
+
+model PlanEntitlement {
+  id              String   @id @default(uuid())
+  userId          String
+  plan            String
+  family          String
+  billingInterval String
+  status          String   @default("active")
+  startsAt        DateTime
+  expiresAt       DateTime
+  activatedAt     DateTime?
+  sourceRequestId String?
+  limitUnits      Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, family, startsAt, expiresAt])
+  @@index([sourceRequestId])
 }
 
 model Setting {

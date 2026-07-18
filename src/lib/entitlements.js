@@ -5,7 +5,6 @@ import { getModelFamily, isModelAllowedForPlan } from "@/lib/models";
 import { buildFreeSubscriptionData } from "@/lib/subscription-expiry";
 
 const STACKABLE_FAMILIES = new Set(["gpt", "claude", "grok"]);
-let schemaPromise = null;
 
 const LEGACY_ENTITLEMENT_LIMITS = {
   gpt_chat: { "3day": 8000000, weekly: 20000000, monthly: 40000000 },
@@ -59,40 +58,7 @@ export function isStackablePlan(plan) {
 }
 
 export async function ensureEntitlementSchema() {
-  if (!schemaPromise) {
-    schemaPromise = (async () => {
-      await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "PlanEntitlement" (
-        "id" TEXT NOT NULL PRIMARY KEY,
-        "userId" TEXT NOT NULL,
-        "plan" TEXT NOT NULL,
-        "family" TEXT NOT NULL,
-        "billingInterval" TEXT NOT NULL,
-        "status" TEXT NOT NULL DEFAULT 'active',
-        "startsAt" TEXT NOT NULL,
-        "expiresAt" TEXT NOT NULL,
-        "activatedAt" TEXT,
-        "sourceRequestId" TEXT,
-        "createdAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )`);
-      await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "PlanEntitlement_user_family_idx" ON "PlanEntitlement" ("userId", "family", "startsAt", "expiresAt")');
-      await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "PlanEntitlement_request_idx" ON "PlanEntitlement" ("sourceRequestId")');
-      await prisma.$executeRawUnsafe('ALTER TABLE "PlanEntitlement" ADD COLUMN "limitUnits" INTEGER').catch(() => null);
-      for (const [plan, limits] of Object.entries(LEGACY_ENTITLEMENT_LIMITS)) {
-        for (const [interval, limit] of Object.entries(limits)) {
-          await prisma.$executeRawUnsafe(
-            'UPDATE "PlanEntitlement" SET "limitUnits" = ? WHERE "limitUnits" IS NULL AND "plan" = ? AND "billingInterval" = ?',
-            limit,
-            plan,
-            interval,
-          ).catch(() => null);
-        }
-      }
-      await prisma.$executeRawUnsafe('ALTER TABLE "TokenUsage" ADD COLUMN "packageId" TEXT').catch(() => null);
-      await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "TokenUsage_package_idx" ON "TokenUsage" ("packageId", "timestamp")').catch(() => null);
-    })();
-  }
-  return schemaPromise;
+  // Schema managed via Prisma migrations
 }
 
 function deriveStatus(row, now = new Date()) {
