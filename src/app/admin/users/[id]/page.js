@@ -239,23 +239,39 @@ export default function AdminUserDetailPage() {
       <Link href="/admin/users" className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-white"><ArrowLeft size={12} />Back to Users</Link>
 
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-black text-white">{user.name || "Unnamed"}</h1>
+        <div className="space-y-3 min-w-0 flex-1">
+          <div className="flex items-center gap-3">
+            <input
+              type="text"
+              value={draft.userName ?? ""}
+              onChange={e => setDraft({...draft, userName: e.target.value})}
+              placeholder="Full name"
+              className="bg-transparent text-2xl font-black text-white border-b border-transparent hover:border-white/20 focus:border-indigo-400 outline-none transition flex-1 min-w-0"
+            />
             {user.disabled && (
-              <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 font-semibold">Disabled</span>
+              <span className="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 font-semibold">Disabled</span>
             )}
           </div>
-          <p className="text-sm text-gray-400 font-mono">{user.email}</p>
-          <div className="flex items-center gap-3 mt-2 text-[11px] text-gray-500">
+          <input
+            type="email"
+            value={draft.userEmail ?? ""}
+            onChange={e => setDraft({...draft, userEmail: e.target.value})}
+            placeholder="user@example.com"
+            className="bg-transparent text-sm text-gray-400 font-mono border-b border-transparent hover:border-white/20 focus:border-indigo-400 outline-none transition w-full max-w-sm"
+          />
+          <div className="flex items-center gap-3 text-[11px] text-gray-500 flex-wrap">
             <span>Role: {user.role}</span>
             <span className={user.emailVerifiedAt ? "text-emerald-400" : "text-amber-300"}>{user.emailVerifiedAt ? "Verified" : "Not Verified"}</span>
+            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+              <input type="checkbox" checked={!draft.userDisabled} onChange={e => setDraft({...draft, userDisabled: !e.target.checked})} className="accent-indigo-500" />
+              <span className={draft.userDisabled ? "text-red-400" : "text-emerald-400"}>{draft.userDisabled ? "Disabled" : "Active"}</span>
+            </label>
             <span>{conversationCount} conversations</span>
             <span>{apiKeys?.length || 0} API keys</span>
             <span>Joined: {new Date(user.createdAt).toLocaleDateString()}</span>
           </div>
           {lastActivity?.timestamp && (
-            <p className="text-[11px] text-gray-500 mt-1">Last activity: {new Date(lastActivity.timestamp).toLocaleString()} ({lastActivity.modelUsed})</p>
+            <p className="text-[11px] text-gray-500">Last activity: {new Date(lastActivity.timestamp).toLocaleString()} ({lastActivity.modelUsed})</p>
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -285,20 +301,16 @@ export default function AdminUserDetailPage() {
         </div>
 
         <div className="rounded-2xl bg-white/[0.02] border border-white/5 p-4">
-          <h3 className="font-bold text-white text-sm mb-3">Account Info</h3>
-          <div className="space-y-3">
-            <Field label="Name">
-              <input type="text" value={draft.userName ?? ""} onChange={e => setDraft({...draft, userName: e.target.value})} placeholder="Full name" className="glass-input rounded-lg px-3 py-2 text-sm w-full" />
-            </Field>
-            <Field label="Email">
-              <input type="email" value={draft.userEmail ?? ""} onChange={e => setDraft({...draft, userEmail: e.target.value})} placeholder="user@example.com" className="glass-input rounded-lg px-3 py-2 text-sm w-full" />
-            </Field>
-            <Field label="Account Status">
-              <label className="flex h-[38px] items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/5 text-sm text-gray-300 cursor-pointer">
-                <input type="checkbox" checked={!draft.userDisabled} onChange={e => setDraft({...draft, userDisabled: !e.target.checked})} />
-                {draft.userDisabled ? "Disabled" : "Active"}
-              </label>
-            </Field>
+          <h3 className="font-bold text-white text-sm mb-3">Recent Conversations</h3>
+          <div className="space-y-2">
+            {(conversations || []).length === 0 ? (
+              <p className="text-xs text-gray-500">No conversations yet.</p>
+            ) : conversations.map((c) => (
+              <div key={c.id} className="rounded-lg bg-black/20 p-2 text-xs">
+                <div className="truncate text-gray-300 font-medium">{c.title}</div>
+                <div className="text-gray-600 mt-0.5">{new Date(c.updatedAt).toLocaleDateString()}</div>
+              </div>
+            ))}
           </div>
         </div>
       </div>

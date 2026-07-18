@@ -158,8 +158,6 @@ export default function AdminUsersPage() {
           <span className="text-indigo-300 font-semibold">{selected.size} selected</span>
           <button onClick={() => bulkAction("activate")} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white cursor-pointer">Activate</button>
           <button onClick={() => bulkAction("suspend")} className="px-3 py-1.5 rounded-lg bg-amber-600 text-white cursor-pointer">Suspend</button>
-          <button onClick={() => bulkAction("disable")} className="px-3 py-1.5 rounded-lg bg-red-600 text-white cursor-pointer">Disable</button>
-          <button onClick={() => bulkAction("enable")} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white cursor-pointer">Enable</button>
           <button onClick={() => bulkAction("delete")} className="px-3 py-1.5 rounded-lg bg-red-600 text-white cursor-pointer">Delete</button>
         </div>
       )}
