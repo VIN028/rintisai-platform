@@ -557,7 +557,7 @@ export default function HomePage() {
     const textarea = inputTextareaRef.current;
     if (!textarea) return;
     textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 360)}px`;
   };
 
   // Fetch Local API Keys when API Access is enabled for a paid plan.
@@ -1593,6 +1593,7 @@ export default function HomePage() {
       let sseBuffer = "";
       let assistantBuffer = "";
       let flushTimer = null;
+      let lastFinishReason = null;
 
       const flushAssistantContent = () => {
         if (!assistantBuffer) return;
@@ -1657,6 +1658,8 @@ export default function HomePage() {
               fetchConversations();
             } else if (Object.prototype.hasOwnProperty.call(parsed, "content")) {
               appendAssistantContent(parsed.content);
+            } else if (parsed.finishReason) {
+              lastFinishReason = parsed.finishReason;
             }
           } catch {
             // Keep malformed events from breaking the stream UI.
@@ -1689,6 +1692,15 @@ export default function HomePage() {
         flushTimer = null;
       }
       flushAssistantContent();
+      if (lastFinishReason && lastFinishReason !== "stop" && lastFinishReason !== "end_turn") {
+        updateConversationMessages(streamConvId || streamStatusId, (prev) => {
+          const updated = [...prev];
+          if (updated.length > 0) {
+            updated[updated.length - 1] = { ...updated[updated.length - 1], finishReason: lastFinishReason };
+          }
+          return updated;
+        });
+      }
       if (!receivedAssistantContent) {
         setMessages(prev => prev.slice(0, prev.length - 2));
         showToast("No response received. The AI may be unavailable or the model key is not configured.", "error");
@@ -2869,6 +2881,11 @@ export default function HomePage() {
                               {getStreamStatusLabel(activeStreamStatus)}
                             </div>
                           )}
+                          {msg.finishReason === "length" && (
+                            <div className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300 leading-relaxed">
+                              Response terpotong oleh batas token. Coba ketik &quot;Lanjutkan&quot; atau kirim ulang dengan instruksi lebih ringkas.
+                            </div>
+                          )}
                         </div>
                       )
                     )}
@@ -3008,7 +3025,7 @@ export default function HomePage() {
               onPaste={handlePaste}
               onInput={(e) => {
                 e.target.style.height = "auto";
-                e.target.style.height = Math.min(e.target.scrollHeight, 200) + "px";
+                e.target.style.height = Math.min(e.target.scrollHeight, 360) + "px";
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -3018,7 +3035,7 @@ export default function HomePage() {
               }}
               placeholder={limitExceeded || limitBlocked ? "Usage limit reached - upgrade to continue" : getModelConfig(selectedModel)?.vision ? "Type your message here... (Enter to send, paste images/files)" : "Type your message here... (Enter to send, attach files)"}
               rows={1}
-              className="w-full glass-input pr-14 pl-5 py-4 rounded-2xl text-sm focus:outline-none resize-none overflow-y-hidden shadow-2xl shadow-black/45"
+              className="w-full glass-input pr-14 pl-5 py-4 rounded-2xl text-sm focus:outline-none resize-none overflow-y-auto shadow-2xl shadow-black/45"
             />
             <button
               type={activeChatBusy ? "button" : "submit"}

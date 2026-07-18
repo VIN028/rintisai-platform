@@ -299,6 +299,7 @@ export async function POST(req) {
             let completionText = "";
             let promptTokens = contextPlan.promptTokens;
             let completionTokens = null;
+            let lastFinishReason = null;
 
             if (anthropicContentType.includes("text/event-stream")) {
               const anthropicReader = anthropicResponse.body.getReader();
@@ -319,6 +320,10 @@ export async function POST(req) {
                     if (parsed.message?.usage?.input_tokens) promptTokens = parsed.message.usage.input_tokens;
                     if (parsed.usage?.input_tokens) promptTokens = parsed.usage.input_tokens;
                     if (parsed.usage?.output_tokens) completionTokens = parsed.usage.output_tokens;
+
+                    if (parsed.delta?.stop_reason) lastFinishReason = parsed.delta.stop_reason;
+                    if (parsed.message?.stop_reason) lastFinishReason = parsed.message.stop_reason;
+                    if (parsed.content_block?.stop_reason) lastFinishReason = parsed.content_block.stop_reason;
 
                     const textDelta = parsed.delta?.text || parsed.content_block?.text || "";
                     if (textDelta) {
@@ -380,6 +385,9 @@ export async function POST(req) {
             }
 
             completionTokens = completionTokens || estimateTokens(completionText);
+            if (lastFinishReason && lastFinishReason !== "end_turn" && lastFinishReason !== "stop") {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ finishReason: lastFinishReason })}\n\n`));
+            }
             controller.enqueue(encoder.encode("data: [DONE]\n\n"));
 
             try {
@@ -568,6 +576,7 @@ export async function POST(req) {
     let actualCompletionTokens = null;
     let reasoningText = "";
     let shouldPersistCompletion = true;
+    let lastFinishReason = null;
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -601,6 +610,9 @@ export async function POST(req) {
                   shouldPersistCompletion = false;
                   return true;
                 }
+                if (lastFinishReason && lastFinishReason !== "stop") {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ finishReason: lastFinishReason })}\n\n`));
+                }
                 controller.enqueue(encoder.encode("data: [DONE]\n\n"));
                 return true;
               }
@@ -613,7 +625,10 @@ export async function POST(req) {
                   actualCompletionTokens = parsed.usage.completion_tokens;
                 }
 
-                const content = parsed.choices?.[0]?.delta?.content || "";
+                const choice = parsed.choices?.[0];
+                if (choice?.finish_reason) lastFinishReason = choice.finish_reason;
+
+                const content = choice?.delta?.content || "";
                 if (content) completionText += content;
 
                 if (content) {

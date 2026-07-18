@@ -70,3 +70,10 @@
 - Add name, email, and disabled toggle inputs to user detail page
 - Save now calls PATCH /api/admin/users (subscription) + PATCH /api/admin/users/[id] (user fields) in parallel
 - Add bulk disable/enable buttons to the list page action bar
+
+2026-07-19 v9
+
+- Fix textarea scroll: change overflow-y-hidden to overflow-y-auto, max height 200→360px
+- Track finish_reason/stop_reason from upstream SSE (OpenAI + Anthropic)
+- Forward finishReason to client before [DONE] when not stop/end_turn
+- Show amber warning banner on truncated responses (finish_reason=length)
