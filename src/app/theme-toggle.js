@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-export function ThemeToggle() {
+export function ThemeToggle({ className = "theme-toggle" }) {
   const [dark, setDark] = useState(false);
 
   useEffect(() => {
@@ -21,7 +21,7 @@ export function ThemeToggle() {
   };
 
   return (
-    <button onClick={toggle} className="theme-toggle" title={dark ? "Switch to light" : "Switch to dark"}>
+    <button onClick={toggle} className={className} title={dark ? "Switch to light" : "Switch to dark"}>
       {dark ? (
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
       ) : (

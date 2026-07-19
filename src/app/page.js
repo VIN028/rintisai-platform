@@ -7,6 +7,7 @@ import { getMaxContextTokens, getMaxOutputTokens, getModelConfig, isModelAllowed
 import { PLAN_CATALOG, getPlanDefinition, isApiPlan } from "@/lib/plans";
 import { clearFieldValidity, handleFormInvalid } from "@/lib/form-validation";
 import { API_MODEL_GROUPS, API_PAYG_PRICING, API_TOPUP_AMOUNTS, calculateApiCostRp, calculateApiCostUsd, recommendTopupAmount } from "@/lib/api-products";
+import { ThemeToggle } from "@/app/theme-toggle";
 import {
   Bot,
   Send,
@@ -2450,12 +2451,15 @@ export default function HomePage() {
             </div>
             <span className="font-bold text-white tracking-wide">RintisAI</span>
           </div>
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="md:hidden p-1.5 hover:bg-white/5 text-gray-400 rounded-lg cursor-pointer"
-          >
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-1">
+            <ThemeToggle className="p-1.5 hover:bg-white/5 text-gray-400 rounded-lg cursor-pointer" />
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="md:hidden p-1.5 hover:bg-white/5 text-gray-400 rounded-lg cursor-pointer"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* New Chat Action */}
