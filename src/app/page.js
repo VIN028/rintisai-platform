@@ -1561,10 +1561,11 @@ export default function HomePage() {
     setConversationStreamStatus(streamStatusId, { startedAt: currentTimestamp(), phase: "reading_context", hasContent: false });
 
     let receivedAssistantContent = false;
+    let streamIdleTimeout;
     try {
       const requestController = new AbortController();
       activeChatRequestRef.current = { controller: requestController, stopped: false, streamId: streamStatusId };
-      const requestTimeout = setTimeout(() => requestController.abort(), hasImages || hasFiles ? 90_000 : 70_000);
+      const initTimeout = setTimeout(() => requestController.abort(), hasImages || hasFiles ? 90_000 : 70_000);
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1579,7 +1580,12 @@ export default function HomePage() {
           ...(canUseReasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         }),
       });
-      clearTimeout(requestTimeout);
+      clearTimeout(initTimeout);
+      const resetStreamIdleTimeout = () => {
+        clearTimeout(streamIdleTimeout);
+        streamIdleTimeout = setTimeout(() => requestController.abort(), 120_000);
+      };
+      resetStreamIdleTimeout();
 
       if (!response.ok) {
         const rawError = await response.text();
@@ -1673,6 +1679,7 @@ export default function HomePage() {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        resetStreamIdleTimeout();
 
         sseBuffer += decoder.decode(value, { stream: true });
         const events = sseBuffer.split("\n\n");
@@ -1753,6 +1760,7 @@ export default function HomePage() {
       }
       fetchAuth();
     } finally {
+      clearTimeout(streamIdleTimeout);
       setConversationStreaming(streamConvId, false);
       setConversationStreaming(streamStatusId, false);
       clearConversationStreamStatus(streamConvId);
