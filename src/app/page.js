@@ -877,6 +877,8 @@ export default function HomePage() {
     if (distanceFromBottom < 180) {
       chatEndRef.current?.scrollIntoView({ behavior: "instant", block: "end" });
     }
+    setShowScrollBottom(distanceFromBottom > 300);
+    setShowScrollTop(container.scrollTop > 400);
   }, [messages]);
 
   // Show/hide floating scroll-to-top and scroll-to-bottom buttons
