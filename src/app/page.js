@@ -921,14 +921,17 @@ export default function HomePage() {
   useEffect(() => {
     if (!user?.id || activeConvId || conversations.length === 0 || messages.length > 0) return;
     const lastConversationId = window.localStorage.getItem(getLastConversationKey(user.id));
-    if (!lastConversationId) return;
-    const exists = conversations.some((conversation) => conversation.id === lastConversationId);
-    if (exists) {
-      const timer = setTimeout(() => handleSelectConversation(lastConversationId), 0);
-      return () => clearTimeout(timer);
-    } else {
+    if (lastConversationId) {
+      const exists = conversations.some((conversation) => conversation.id === lastConversationId);
+      if (exists) {
+        const timer = setTimeout(() => handleSelectConversation(lastConversationId), 0);
+        return () => clearTimeout(timer);
+      }
       window.localStorage.removeItem(getLastConversationKey(user.id));
     }
+    // Fallback: select the most recently updated conversation
+    const timer = setTimeout(() => handleSelectConversation(conversations[0].id), 0);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, conversations, activeConvId, messages.length]);
 
