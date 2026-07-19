@@ -37,6 +37,8 @@ import {
   XCircle,
   ArrowDownToLine,
   Copy,
+  ChevronUp,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   BarChart3,
@@ -458,6 +460,8 @@ export default function HomePage() {
   const activeChatRequestRef = useRef(null);
   const [streamingConversationIds, setStreamingConversationIds] = useState([]);
   const [streamStatusById, setStreamStatusById] = useState({});
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [processTick, setProcessTick] = useState(0);
   const [upgradeStep, setUpgradeStep] = useState("select");
   const [upgradePlan, setUpgradePlan] = useState("pro");
@@ -874,6 +878,20 @@ export default function HomePage() {
       chatEndRef.current?.scrollIntoView({ behavior: "instant", block: "end" });
     }
   }, [messages]);
+
+  // Show/hide floating scroll-to-top and scroll-to-bottom buttons
+  useEffect(() => {
+    const container = chatScrollRef.current;
+    if (!container) return;
+    const handleScroll = () => {
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      setShowScrollBottom(distanceFromBottom > 300);
+      setShowScrollTop(container.scrollTop > 400);
+    };
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    handleScroll();
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, []);
 
   useEffect(() => {
     const handler = (e) => {
@@ -2900,6 +2918,26 @@ export default function HomePage() {
             </div>
           )}
         </div>
+
+        {/* Scroll to top / bottom floating buttons */}
+        {showScrollTop && (
+          <button
+            onClick={() => chatScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })}
+            className="absolute top-20 right-4 z-20 p-2.5 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-gray-300 hover:bg-white/20 hover:text-white transition cursor-pointer shadow-lg"
+            title="Scroll to top"
+          >
+            <ChevronUp size={18} />
+          </button>
+        )}
+        {showScrollBottom && (
+          <button
+            onClick={() => chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })}
+            className="absolute bottom-20 right-4 z-20 p-2.5 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-gray-300 hover:bg-white/20 hover:text-white transition cursor-pointer shadow-lg"
+            title="Scroll to bottom"
+          >
+            <ChevronDown size={18} />
+          </button>
+        )}
 
         {/* Input Bar Form */}
         <footer className="p-3 sm:p-6 bg-gradient-to-t from-main via-main to-transparent">
