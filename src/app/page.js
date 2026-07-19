@@ -919,21 +919,14 @@ export default function HomePage() {
   };
 
   useEffect(() => {
-    if (!user?.id || activeConvId || conversations.length === 0 || messages.length > 0) return;
+    if (!user?.id || conversations.length === 0 || activeConvId) return;
     const lastConversationId = window.localStorage.getItem(getLastConversationKey(user.id));
-    if (lastConversationId) {
-      const exists = conversations.some((conversation) => conversation.id === lastConversationId);
-      if (exists) {
-        const timer = setTimeout(() => handleSelectConversation(lastConversationId), 0);
-        return () => clearTimeout(timer);
-      }
-      window.localStorage.removeItem(getLastConversationKey(user.id));
-    }
-    // Fallback: select the most recently updated conversation
-    const timer = setTimeout(() => handleSelectConversation(conversations[0].id), 0);
-    return () => clearTimeout(timer);
+    const targetId = lastConversationId && conversations.some((c) => c.id === lastConversationId)
+      ? lastConversationId
+      : conversations[0].id;
+    handleSelectConversation(targetId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, conversations, activeConvId, messages.length]);
+  }, [user?.id, conversations]);
 
   const handleNewChat = () => {
     conversationLoadSeqRef.current += 1;
