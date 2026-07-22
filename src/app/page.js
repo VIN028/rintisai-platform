@@ -2647,7 +2647,7 @@ export default function HomePage() {
       </aside>
 
       {/* 💬 MAIN CHAT WORKSPACE AREA */}
-      <main className="flex-1 min-w-0 min-h-0 flex flex-col h-full relative" onWheelCapture={handleChatWheel}>
+      <main className="flex-1 min-w-0 min-h-0 flex flex-col h-full relative">
 
         {/* Top Header Bar */}
         <header className="min-h-14 sm:min-h-16 border-b border-white/5 flex flex-wrap items-center justify-between gap-2 px-3 py-2 sm:px-6 bg-slate-950/20 backdrop-blur-md z-10">
