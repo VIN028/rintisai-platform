@@ -11,7 +11,7 @@ export const API_KEY_SCOPE_LABELS = {
   grok: "discontinued",
 };
 
-let columnsReady = false;
+
 
 export function providerForModel(model) {
   const name = String(model || "");
@@ -47,19 +47,12 @@ export function normalizeQuotaUsdMicros(value) {
 }
 
 export async function ensureApiKeyMetadataColumns() {
-  if (columnsReady) return;
-  await prisma.$executeRawUnsafe('ALTER TABLE "ApiKey" ADD COLUMN providerScope TEXT NOT NULL DEFAULT \'all\'').catch(() => null);
-  await prisma.$executeRawUnsafe('ALTER TABLE "ApiKey" ADD COLUMN quotaUsdMicros INTEGER NOT NULL DEFAULT 0').catch(() => null);
-  await prisma.$executeRawUnsafe('ALTER TABLE "ApiKey" ADD COLUMN status TEXT NOT NULL DEFAULT \'active\'').catch(() => null);
-  columnsReady = true;
+  // Columns managed via Prisma migrations
 }
 
 export async function getApiKeyMetadata(keyId) {
   await ensureApiKeyMetadataColumns();
-  const rows = await prisma.$queryRawUnsafe(
-    'SELECT id, providerScope, quotaUsdMicros, status FROM "ApiKey" WHERE id = ?',
-    keyId,
-  ).catch(() => []);
+  const rows = await prisma.$queryRaw`SELECT id, providerScope, quotaUsdMicros, status FROM "ApiKey" WHERE id = ${keyId}`.catch(() => []);
   const row = rows?.[0] || {};
   return {
     providerScope: normalizeApiKeyScope(row.providerScope),

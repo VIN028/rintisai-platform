@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import prisma from "@/lib/db";
 import { authenticateAdmin } from "@/lib/auth";
 
@@ -9,42 +10,23 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const rawDays = searchParams.get("days") || "30";
     const days = rawDays === "all" ? null : Math.min(Math.max(Number(rawDays) || 30, 1), 3650);
-    const now = new Date();
-    const since = days ? new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString().replace("T", " ").slice(0, 19) : null;
-    const tokenWhere = since ? 'WHERE "timestamp" >= ?' : '';
-    const ledgerWhere = since ? 'WHERE "type" = \'usage\' AND "createdAt" >= ?' : 'WHERE "type" = \'usage\'';
-    const ledgerRecentWhere = since ? 'WHERE l."type" = \'usage\' AND l."createdAt" >= ?' : 'WHERE l."type" = \'usage\'';
-    const tokenParams = since ? [since] : [];
-    const ledgerParams = since ? [since] : [];
+    const since = days ? new Date(Date.now() - days * 24 * 60 * 60 * 1000) : null;
+
+    const tokenCondition = since ? Prisma.sql`WHERE "timestamp" >= ${since}` : Prisma.sql``;
+    const ledgerCondition = since ? Prisma.sql`WHERE "type" = 'usage' AND "createdAt" >= ${since}` : Prisma.sql`WHERE "type" = 'usage'`;
+    const recentCondition = since ? Prisma.sql`WHERE t."timestamp" >= ${since}` : Prisma.sql``;
+    const ledgerRecentCondition = since ? Prisma.sql`WHERE l."type" = 'usage' AND l."createdAt" >= ${since}` : Prisma.sql`WHERE l."type" = 'usage'`;
 
     const [totals, recent, userRows, ledgerTotals, ledgerRecent, ledgerUserRows, apiKeys] = await Promise.all([
-      prisma.$queryRawUnsafe(
-        `SELECT COALESCE(SUM("promptTokens"),0) as "promptTokens", COALESCE(SUM("completionTokens"),0) as "completionTokens", COALESCE(SUM("totalTokens"),0) as "totalTokens", COUNT(*) as "count", COALESCE(SUM(CASE WHEN "source" = 'web' THEN 1 ELSE 0 END),0) as "webCount", COALESCE(SUM(CASE WHEN "source" = 'api' THEN 1 ELSE 0 END),0) as "apiCount" FROM "TokenUsage" ${tokenWhere}`,
-        ...tokenParams,
-      ),
-      prisma.$queryRawUnsafe(
-        `SELECT t.id, t."userId", t."modelUsed", t."promptTokens", t."completionTokens", t."totalTokens", t."source", t."timestamp", u.email as "userEmail", u.name as "userName" FROM "TokenUsage" t LEFT JOIN "User" u ON u.id = t."userId" ${since ? 'WHERE t."timestamp" >= ?' : ''} ORDER BY t."timestamp" DESC LIMIT 30`,
-        ...tokenParams,
-      ),
-      prisma.$queryRawUnsafe(
-        `SELECT "userId", SUM("promptTokens") as "promptTokens", SUM("completionTokens") as "completionTokens", SUM("totalTokens") as "totalTokens", COUNT(*) as "count", SUM(CASE WHEN "source" = 'web' THEN 1 ELSE 0 END) as "webCount", SUM(CASE WHEN "source" = 'api' THEN 1 ELSE 0 END) as "apiCount" FROM "TokenUsage" ${tokenWhere} GROUP BY "userId" ORDER BY SUM("totalTokens") DESC`,
-        ...tokenParams,
-      ),
-      prisma.$queryRawUnsafe(
-        `SELECT COALESCE(SUM("promptTokens"),0) as "promptTokens", COALESCE(SUM("completionTokens"),0) as "completionTokens", COALESCE(SUM("promptTokens" + "completionTokens"),0) as "totalTokens", COUNT(*) as "count" FROM "ApiCreditLedger" ${ledgerWhere}`,
-        ...ledgerParams,
-      ),
-      prisma.$queryRawUnsafe(
-        `SELECT l.id, l."userId", l."modelUsed", l."promptTokens", l."completionTokens", (l."promptTokens" + l."completionTokens") as "totalTokens", 'payg' as "source", l."createdAt" as "timestamp", u.email as "userEmail", u.name as "userName" FROM "ApiCreditLedger" l LEFT JOIN "User" u ON u.id = l."userId" ${ledgerRecentWhere} ORDER BY l."createdAt" DESC LIMIT 30`,
-        ...ledgerParams,
-      ),
-      prisma.$queryRawUnsafe(
-        `SELECT "userId", SUM("promptTokens") as "promptTokens", SUM("completionTokens") as "completionTokens", SUM("promptTokens" + "completionTokens") as "totalTokens", COUNT(*) as "count" FROM "ApiCreditLedger" ${ledgerWhere} GROUP BY "userId" ORDER BY SUM("promptTokens" + "completionTokens") DESC`,
-        ...ledgerParams,
-      ),
+      prisma.$queryRaw`SELECT COALESCE(SUM("promptTokens"),0) as "promptTokens", COALESCE(SUM("completionTokens"),0) as "completionTokens", COALESCE(SUM("totalTokens"),0) as "totalTokens", COUNT(*) as "count", COALESCE(SUM(CASE WHEN "source" = 'web' THEN 1 ELSE 0 END),0) as "webCount", COALESCE(SUM(CASE WHEN "source" = 'api' THEN 1 ELSE 0 END),0) as "apiCount" FROM "TokenUsage" ${tokenCondition}`,
+      prisma.$queryRaw`SELECT t.id, t."userId", t."modelUsed", t."promptTokens", t."completionTokens", t."totalTokens", t."source", t."timestamp", u.email as "userEmail", u.name as "userName" FROM "TokenUsage" t LEFT JOIN "User" u ON u.id = t."userId" ${recentCondition} ORDER BY t."timestamp" DESC LIMIT 30`,
+      prisma.$queryRaw`SELECT "userId", SUM("promptTokens") as "promptTokens", SUM("completionTokens") as "completionTokens", SUM("totalTokens") as "totalTokens", COUNT(*) as "count", SUM(CASE WHEN "source" = 'web' THEN 1 ELSE 0 END) as "webCount", SUM(CASE WHEN "source" = 'api' THEN 1 ELSE 0 END) as "apiCount" FROM "TokenUsage" ${tokenCondition} GROUP BY "userId" ORDER BY SUM("totalTokens") DESC`,
+      prisma.$queryRaw`SELECT COALESCE(SUM("promptTokens"),0) as "promptTokens", COALESCE(SUM("completionTokens"),0) as "completionTokens", COALESCE(SUM("promptTokens" + "completionTokens"),0) as "totalTokens", COUNT(*) as "count" FROM "ApiCreditLedger" ${ledgerCondition}`,
+      prisma.$queryRaw`SELECT l.id, l."userId", l."modelUsed", l."promptTokens", l."completionTokens", (l."promptTokens" + l."completionTokens") as "totalTokens", 'payg' as "source", l."createdAt" as "timestamp", u.email as "userEmail", u.name as "userName" FROM "ApiCreditLedger" l LEFT JOIN "User" u ON u.id = l."userId" ${ledgerRecentCondition} ORDER BY l."createdAt" DESC LIMIT 30`,
+      prisma.$queryRaw`SELECT "userId", SUM("promptTokens") as "promptTokens", SUM("completionTokens") as "completionTokens", SUM("promptTokens" + "completionTokens") as "totalTokens", COUNT(*) as "count" FROM "ApiCreditLedger" ${ledgerCondition} GROUP BY "userId" ORDER BY SUM("promptTokens" + "completionTokens") DESC`,
       prisma.apiKey
         ? prisma.apiKey.findMany({ select: { id: true, userId: true } })
-        : prisma.$queryRawUnsafe('SELECT id, userId FROM "ApiKey"'),
+        : prisma.$queryRaw`SELECT id, "userId" FROM "ApiKey"`,
     ]);
 
     const apiKeyCounts = apiKeys.reduce((acc, key) => {

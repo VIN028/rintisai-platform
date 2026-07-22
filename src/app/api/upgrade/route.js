@@ -124,20 +124,7 @@ export async function POST(req) {
     } else {
       const id = crypto.randomUUID();
       const createdAt = new Date();
-      await prisma.$executeRawUnsafe(
-        'INSERT INTO "UpgradeRequest" (id, userId, plan, billingInterval, paymentMethod, paymentRef, paymentProof, uniqueCode, transferAmount, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        id,
-        user.id,
-        plan,
-        plan === "topup" || isApiTopup ? "monthly" : interval,
-        paymentMethod,
-        paymentRef?.trim() || null,
-        paymentProof || null,
-        uniqueCode,
-        transferAmount,
-        "pending",
-        createdAt,
-      );
+      await prisma.$executeRaw`INSERT INTO "UpgradeRequest" ("id", "userId", "plan", "billingInterval", "paymentMethod", "paymentRef", "paymentProof", "uniqueCode", "transferAmount", "status", "createdAt") VALUES (${id}, ${user.id}, ${plan}, ${plan === "topup" || isApiTopup ? "monthly" : interval}, ${paymentMethod}, ${paymentRef?.trim() || null}, ${paymentProof || null}, ${uniqueCode}, ${transferAmount}, ${"pending"}, ${createdAt})`;
       request = { id, userId: user.id, plan, paymentMethod, paymentRef, status: "pending", createdAt };
     }
 

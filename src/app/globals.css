@@ -419,7 +419,7 @@ html:not(.dark) .syn-cmt { color: #9ca3af; }
 html:not(.dark) .syn-num { color: #ea580c; }
 html:not(.dark) .syn-fn { color: #2563eb; }
 
-/* Notion doesn't use white text on light bg — convert dark Tailwind classes */
+/* Notion doesn't use white text on light bg - convert dark Tailwind classes */
 html:not(.dark) .text-white { color: var(--text-primary) !important; }
 html:not(.dark) .text-gray-100 { color: #1e1e1e !important; }
 html:not(.dark) .text-gray-200 { color: #37352f !important; }

@@ -49,12 +49,7 @@ export async function reserveUsage({ userId, model, source, apiKeyId = null, est
       ? configuredWindowStart
       : new Date(now.getTime() - windowMs);
     const total = packageId
-      ? Number((await prisma.$queryRawUnsafe(
-        'SELECT COALESCE(SUM("totalTokens"), 0) as total FROM "TokenUsage" WHERE "userId" = ? AND "packageId" = ? AND "timestamp" >= ?',
-        userId,
-        packageId,
-        windowStart.toISOString(),
-      ))?.[0]?.total || 0)
+      ? Number((await prisma.$queryRaw`SELECT COALESCE(SUM("totalTokens"), 0) as total FROM "TokenUsage" WHERE "userId" = ${userId} AND "packageId" = ${packageId} AND "timestamp" >= ${windowStart.toISOString()}`)?.[0]?.total || 0)
       : (await prisma.tokenUsage.aggregate({ where: { userId, timestamp: { gte: windowStart } }, _sum: { totalTokens: true } }))._sum.totalTokens || 0;
     const limit = Number(limits?.limit || 0);
 
@@ -64,19 +59,7 @@ export async function reserveUsage({ userId, model, source, apiKeyId = null, est
 
     if (packageId) {
       const id = randomUUID();
-      await prisma.$executeRawUnsafe(
-        'INSERT INTO "TokenUsage" ("id", "userId", "timestamp", "modelUsed", "promptTokens", "completionTokens", "totalTokens", "source", "apiKeyId", "packageId") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        id,
-        userId,
-        now.toISOString(),
-        model,
-        estimatedPromptTokens,
-        0,
-        estimatedTotalTokens,
-        source,
-        apiKeyId,
-        packageId,
-      );
+      await prisma.$executeRaw`INSERT INTO "TokenUsage" ("id", "userId", "timestamp", "modelUsed", "promptTokens", "completionTokens", "totalTokens", "source", "apiKeyId", "packageId") VALUES (${id}, ${userId}, ${now.toISOString()}, ${model}, ${estimatedPromptTokens}, ${0}, ${estimatedTotalTokens}, ${source}, ${apiKeyId}, ${packageId})`;
       return { reservation: { id } };
     }
 

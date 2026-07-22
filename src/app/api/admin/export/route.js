@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { authenticateAdmin } from "@/lib/auth";
 
+const isPostgres = () =>
+  process.env.DATABASE_URL?.startsWith("postgresql://") || process.env.DATABASE_URL?.startsWith("postgres://");
+
 const csvCell = (value) => {
   const raw = String(value ?? "");
   const safe = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
@@ -34,8 +37,12 @@ export async function GET(req) {
     }
 
     if (type === "usage") {
+      const dateFilter = isPostgres()
+        ? `t."timestamp" >= NOW() - INTERVAL '30 days'`
+        : `t."timestamp" >= datetime("now", "-30 days")`;
+
       const rows = await prisma.$queryRawUnsafe(
-        'SELECT u.email, u.name, s.plan, s.status, SUM(t."totalTokens") as total_units, SUM(t."promptTokens") as input, SUM(t."completionTokens") as output, COUNT(*) as requests FROM "TokenUsage" t LEFT JOIN "User" u ON u.id = t."userId" LEFT JOIN "Subscription" s ON s."userId" = t."userId" WHERE t."timestamp" >= datetime("now", "-30 days") GROUP BY t."userId" ORDER BY total_units DESC'
+        `SELECT u.email, u.name, s.plan, s.status, SUM(t."totalTokens") as total_units, SUM(t."promptTokens") as input, SUM(t."completionTokens") as output, COUNT(*) as requests FROM "TokenUsage" t LEFT JOIN "User" u ON u.id = t."userId" LEFT JOIN "Subscription" s ON s."userId" = t."userId" WHERE ${dateFilter} GROUP BY t."userId" ORDER BY total_units DESC`
       );
 
       const header = "email,name,plan,status,total_units,input,output,requests\n";

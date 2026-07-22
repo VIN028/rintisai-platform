@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowUpRight, Download } from "lucide-react";
+import { ArrowUpRight, Download, X, Plus } from "lucide-react";
 
 function Skeleton() {
   return (
@@ -37,6 +37,12 @@ export default function AdminUsersPage() {
   const [selected, setSelected] = useState(new Set());
   const [msg, setMsg] = useState("");
   const [filter, setFilter] = useState("all");
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserName, setNewUserName] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [newUserRole, setNewUserRole] = useState("USER");
+  const [creating, setCreating] = useState(false);
 
   const fetchUsers = () => {
     fetch("/api/admin/users")
@@ -52,7 +58,6 @@ export default function AdminUsersPage() {
   useEffect(() => { fetchUsers(); }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (filter === "all") { setUsers(allUsers); return; }
     if (filter === "active") { setUsers(allUsers.filter((u) => u.subscription?.status === "active")); return; }
     if (filter === "not_verified") { setUsers(allUsers.filter((u) => !u.emailVerifiedAt)); return; }
@@ -90,6 +95,30 @@ export default function AdminUsersPage() {
     } catch (err) { setMsg("Error: " + err.message); }
   };
 
+  const createUser = async () => {
+    if (!newUserEmail.trim()) return;
+    setCreating(true); setMsg("");
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: newUserEmail.trim(),
+          name: newUserName.trim() || undefined,
+          password: newUserPassword.trim() || undefined,
+          role: newUserRole,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setMsg(`User created. Password: ${data.generatedPassword || newUserPassword}`);
+      setShowCreateModal(false);
+      setNewUserEmail(""); setNewUserName(""); setNewUserPassword(""); setNewUserRole("USER");
+      fetchUsers();
+    } catch (err) { setMsg("Error: " + err.message); }
+    finally { setCreating(false); }
+  };
+
   if (loading) return <Skeleton />;
 
   return (
@@ -100,6 +129,7 @@ export default function AdminUsersPage() {
           <p className="text-sm text-gray-400 mt-1">{users.length} total users</p>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => setShowCreateModal(true)} className="text-[11px] px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer flex items-center gap-1.5"><Plus size={12} />New User</button>
           <a href="/api/admin/export?type=users" className="text-[11px] px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/5 text-gray-400 hover:text-gray-200 cursor-pointer flex items-center gap-1.5"><Download size={12} />CSV</a>
           <a href="/api/admin/export?type=usage" className="text-[11px] px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/5 text-gray-400 hover:text-gray-200 cursor-pointer flex items-center gap-1.5"><Download size={12} />Usage CSV</a>
         </div>
@@ -149,7 +179,12 @@ export default function AdminUsersPage() {
               <tr key={user.id} className={`border-b border-white/5 hover:bg-white/[0.02] ${selected.has(user.id) ? "bg-indigo-500/5" : ""}`}>
                 <td className="p-3"><input type="checkbox" checked={selected.has(user.id)} onChange={() => toggleOne(user.id)} /></td>
                 <td className="p-3">
-                  <div className="font-semibold text-white truncate max-w-[180px]">{user.name || "Unnamed"}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="font-semibold text-white truncate max-w-[160px]">{user.name || "Unnamed"}</div>
+                    {user.disabled && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 font-semibold">Disabled</span>
+                    )}
+                  </div>
                   <div className="text-[10px] text-gray-500 font-mono truncate max-w-[180px]">{user.email}</div>
                 </td>
                 <td className="p-3 text-gray-400 capitalize">{user.subscription?.plan || "free"}</td>
@@ -174,6 +209,41 @@ export default function AdminUsersPage() {
           </tbody>
         </table>
       </div>
+
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#181818] p-6 shadow-2xl shadow-black/40">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-bold text-white">Create New User</h3>
+              <button onClick={() => setShowCreateModal(false)} className="text-gray-500 hover:text-white cursor-pointer"><X size={18} /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] uppercase tracking-wider font-bold text-gray-500 block mb-1">Email *</label>
+                <input type="email" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} placeholder="user@example.com" className="glass-input rounded-lg px-3 py-2 text-sm w-full" />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider font-bold text-gray-500 block mb-1">Name</label>
+                <input type="text" value={newUserName} onChange={e => setNewUserName(e.target.value)} placeholder="Optional" className="glass-input rounded-lg px-3 py-2 text-sm w-full" />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider font-bold text-gray-500 block mb-1">Password</label>
+                <input type="text" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} placeholder="Leave empty to auto-generate" className="glass-input rounded-lg px-3 py-2 text-sm w-full" />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider font-bold text-gray-500 block mb-1">Role</label>
+                <select value={newUserRole} onChange={e => setNewUserRole(e.target.value)} className="glass-input rounded-lg px-3 py-2 text-sm w-full">
+                  <option value="USER" className="bg-slate-900">USER</option>
+                  <option value="ADMIN" className="bg-slate-900">ADMIN</option>
+                </select>
+              </div>
+              <button onClick={createUser} disabled={creating || !newUserEmail.trim()} className="w-full mt-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-900/40 text-white text-sm font-semibold cursor-pointer flex items-center justify-center gap-2">
+                {creating ? "Creating..." : "Create User"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

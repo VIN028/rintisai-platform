@@ -26,7 +26,7 @@ export async function POST(req) {
 
     const currentKeysCount = prisma.apiKey
       ? await prisma.apiKey.count({ where: { userId } })
-      : Number((await prisma.$queryRawUnsafe('SELECT COUNT(*) as count FROM "ApiKey" WHERE userId = ?', userId))?.[0]?.count || 0);
+      : Number((await prisma.$queryRaw`SELECT COUNT(*) as count FROM "ApiKey" WHERE "userId" = ${userId}`)?.[0]?.count || 0);
     const secureKey = `sk-cai-${crypto.randomBytes(24).toString("hex")}`;
     const storedKey = hashApiKey(secureKey);
     const keyName = name?.trim() || `Admin Generated Key ${currentKeysCount + 1}`;
@@ -40,18 +40,11 @@ export async function POST(req) {
       : await (async () => {
         const id = crypto.randomUUID();
         const createdAt = new Date();
-        await prisma.$executeRawUnsafe(
-          'INSERT INTO "ApiKey" (id, key, name, userId, createdAt) VALUES (?, ?, ?, ?, ?)',
-          id,
-          storedKey,
-          keyName,
-          userId,
-          createdAt,
-        );
+        await prisma.$executeRaw`INSERT INTO "ApiKey" (id, key, name, "userId", "createdAt") VALUES (${id}, ${storedKey}, ${keyName}, ${userId}, ${createdAt})`;
         return { id, key: storedKey, name: keyName, userId, createdAt };
       })();
-    await prisma.$executeRawUnsafe('UPDATE "ApiKey" SET encryptedKey = ? WHERE id = ?', encryptApiKey(secureKey), apiKey.id);
-    await prisma.$executeRawUnsafe('UPDATE "ApiKey" SET providerScope = ?, quotaUsdMicros = ?, status = ? WHERE id = ?', providerScope, quotaUsdMicros, "active", apiKey.id);
+    await prisma.$executeRaw`UPDATE "ApiKey" SET "encryptedKey" = ${encryptApiKey(secureKey)} WHERE "id" = ${apiKey.id}`;
+    await prisma.$executeRaw`UPDATE "ApiKey" SET "providerScope" = ${providerScope}, "quotaUsdMicros" = ${quotaUsdMicros}, "status" = ${"active"} WHERE "id" = ${apiKey.id}`;
 
     return NextResponse.json({ message: "API key created.", key: { ...apiKey, key: secureKey, maskedKey: maskApiKey(secureKey), providerScope, quotaUsdMicros, status: "active" } });
   } catch (err) {
@@ -72,7 +65,7 @@ export async function DELETE(req) {
     if (prisma.apiKey) {
       await prisma.apiKey.delete({ where: { id: keyId } });
     } else {
-      await prisma.$executeRawUnsafe('DELETE FROM "ApiKey" WHERE id = ?', keyId);
+      await prisma.$executeRaw`DELETE FROM "ApiKey" WHERE "id" = ${keyId}`;
     }
     return NextResponse.json({ message: "API key revoked." });
   } catch (err) {

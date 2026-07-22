@@ -5,6 +5,8 @@ import { getPlanDefinition } from "@/lib/plans";
 import { getEffectiveLimits } from "@/app/api/auth/me/route";
 import { maskApiKey } from "@/lib/security";
 import { buildFreeSubscriptionData, expireSubscriptionIfNeeded, normalizeStatusForExpiry, resolveAdminPatchExpiry, shouldDowngradeToFree } from "@/lib/subscription-expiry";
+import bcrypt from "bcrypt";
+import crypto from "crypto";
 
 function normalizeLimit(value) {
   if (value === "" || value === null || value === undefined) return null;
@@ -61,6 +63,7 @@ export async function GET(req) {
         emailVerifiedAt: user.emailVerifiedAt,
         name: user.name,
         role: user.role,
+        disabled: user.disabled,
         createdAt: user.createdAt,
         apiKeys: userApiKeys,
         apiKeyCount: userApiKeys.length,
@@ -76,6 +79,54 @@ export async function GET(req) {
     }));
 
     return NextResponse.json({ users: rows });
+  } catch (err) {
+    return NextResponse.json({ error: err.message }, { status: 403 });
+  }
+}
+
+export async function POST(req) {
+  try {
+    const admin = await authenticateAdmin(req);
+    const { email, password, name, role } = await req.json().catch(() => ({}));
+
+    if (!email || typeof email !== "string") {
+      return NextResponse.json({ error: "Email wajib diisi." }, { status: 400 });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (existing) {
+      return NextResponse.json({ error: "Email sudah terdaftar." }, { status: 409 });
+    }
+
+    const userPassword = password && password.length >= 6
+      ? password
+      : crypto.randomUUID().replace(/-/g, "").slice(0, 12) + "Aa1!";
+
+    const hashedPassword = await bcrypt.hash(userPassword, 10);
+
+    const userRole = role === "ADMIN" ? "ADMIN" : "USER";
+
+    const user = await prisma.user.create({
+      data: {
+        email: normalizedEmail,
+        password: hashedPassword,
+        name: name || null,
+        role: userRole,
+        disabled: false,
+      },
+      select: {
+        id: true, email: true, name: true, role: true, disabled: true,
+        emailVerifiedAt: true, createdAt: true,
+      },
+    });
+
+    return NextResponse.json({
+      message: "User berhasil dibuat.",
+      user,
+      generatedPassword: password ? undefined : userPassword,
+    }, { status: 201 });
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 403 });
   }

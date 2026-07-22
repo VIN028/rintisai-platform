@@ -7,6 +7,7 @@ import { getMaxContextTokens, getMaxOutputTokens, getModelConfig, isModelAllowed
 import { PLAN_CATALOG, getPlanDefinition, isApiPlan } from "@/lib/plans";
 import { clearFieldValidity, handleFormInvalid } from "@/lib/form-validation";
 import { API_MODEL_GROUPS, API_PAYG_PRICING, API_TOPUP_AMOUNTS, calculateApiCostRp, calculateApiCostUsd, recommendTopupAmount } from "@/lib/api-products";
+import { ThemeToggle } from "@/app/theme-toggle";
 import {
   Bot,
   Send,
@@ -37,6 +38,8 @@ import {
   XCircle,
   ArrowDownToLine,
   Copy,
+  ChevronUp,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   BarChart3,
@@ -458,6 +461,8 @@ export default function HomePage() {
   const activeChatRequestRef = useRef(null);
   const [streamingConversationIds, setStreamingConversationIds] = useState([]);
   const [streamStatusById, setStreamStatusById] = useState({});
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [processTick, setProcessTick] = useState(0);
   const [upgradeStep, setUpgradeStep] = useState("select");
   const [upgradePlan, setUpgradePlan] = useState("pro");
@@ -557,7 +562,7 @@ export default function HomePage() {
     const textarea = inputTextareaRef.current;
     if (!textarea) return;
     textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 360)}px`;
   };
 
   // Fetch Local API Keys when API Access is enabled for a paid plan.
@@ -873,7 +878,23 @@ export default function HomePage() {
     if (distanceFromBottom < 180) {
       chatEndRef.current?.scrollIntoView({ behavior: "instant", block: "end" });
     }
+    setShowScrollBottom(distanceFromBottom > 300);
+    setShowScrollTop(container.scrollTop > 400);
   }, [messages]);
+
+  // Show/hide floating scroll-to-top and scroll-to-bottom buttons
+  useEffect(() => {
+    const container = chatScrollRef.current;
+    if (!container) return;
+    const handleScroll = () => {
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      setShowScrollBottom(distanceFromBottom > 300);
+      setShowScrollTop(container.scrollTop > 400);
+    };
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    handleScroll();
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, []);
 
   useEffect(() => {
     const handler = (e) => {
@@ -919,18 +940,14 @@ export default function HomePage() {
   };
 
   useEffect(() => {
-    if (!user?.id || activeConvId || conversations.length === 0 || messages.length > 0) return;
+    if (!user?.id || conversations.length === 0 || activeConvId) return;
     const lastConversationId = window.localStorage.getItem(getLastConversationKey(user.id));
-    if (!lastConversationId) return;
-    const exists = conversations.some((conversation) => conversation.id === lastConversationId);
-    if (exists) {
-      const timer = setTimeout(() => handleSelectConversation(lastConversationId), 0);
-      return () => clearTimeout(timer);
-    } else {
-      window.localStorage.removeItem(getLastConversationKey(user.id));
-    }
+    const targetId = lastConversationId && conversations.some((c) => c.id === lastConversationId)
+      ? lastConversationId
+      : conversations[0].id;
+    handleSelectConversation(targetId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, conversations, activeConvId, messages.length]);
+  }, [user?.id, conversations]);
 
   const handleNewChat = () => {
     conversationLoadSeqRef.current += 1;
@@ -1573,10 +1590,11 @@ export default function HomePage() {
     setConversationStreamStatus(streamStatusId, { startedAt: currentTimestamp(), phase: "reading_context", hasContent: false });
 
     let receivedAssistantContent = false;
+    let streamIdleTimeout;
     try {
       const requestController = new AbortController();
       activeChatRequestRef.current = { controller: requestController, stopped: false, streamId: streamStatusId };
-      const requestTimeout = setTimeout(() => requestController.abort(), hasImages || hasFiles ? 90_000 : 70_000);
+      const initTimeout = setTimeout(() => requestController.abort(), hasImages || hasFiles ? 90_000 : 70_000);
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1591,7 +1609,12 @@ export default function HomePage() {
           ...(canUseReasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         }),
       });
-      clearTimeout(requestTimeout);
+      clearTimeout(initTimeout);
+      const resetStreamIdleTimeout = () => {
+        clearTimeout(streamIdleTimeout);
+        streamIdleTimeout = setTimeout(() => requestController.abort(), 120_000);
+      };
+      resetStreamIdleTimeout();
 
       if (!response.ok) {
         const rawError = await response.text();
@@ -1605,6 +1628,7 @@ export default function HomePage() {
       let sseBuffer = "";
       let assistantBuffer = "";
       let flushTimer = null;
+      let lastFinishReason = null;
 
       const flushAssistantContent = () => {
         if (!assistantBuffer) return;
@@ -1669,6 +1693,8 @@ export default function HomePage() {
               fetchConversations();
             } else if (Object.prototype.hasOwnProperty.call(parsed, "content")) {
               appendAssistantContent(parsed.content);
+            } else if (parsed.finishReason) {
+              lastFinishReason = parsed.finishReason;
             }
           } catch {
             // Keep malformed events from breaking the stream UI.
@@ -1682,6 +1708,7 @@ export default function HomePage() {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        resetStreamIdleTimeout();
 
         sseBuffer += decoder.decode(value, { stream: true });
         const events = sseBuffer.split("\n\n");
@@ -1701,6 +1728,15 @@ export default function HomePage() {
         flushTimer = null;
       }
       flushAssistantContent();
+      if (lastFinishReason && lastFinishReason !== "stop" && lastFinishReason !== "end_turn") {
+        updateConversationMessages(streamConvId || streamStatusId, (prev) => {
+          const updated = [...prev];
+          if (updated.length > 0) {
+            updated[updated.length - 1] = { ...updated[updated.length - 1], finishReason: lastFinishReason };
+          }
+          return updated;
+        });
+      }
       if (!receivedAssistantContent) {
         setMessages(prev => prev.slice(0, prev.length - 2));
         showToast("No response received. The AI may be unavailable or the model key is not configured.", "error");
@@ -1753,6 +1789,7 @@ export default function HomePage() {
       }
       fetchAuth();
     } finally {
+      clearTimeout(streamIdleTimeout);
       setConversationStreaming(streamConvId, false);
       setConversationStreaming(streamStatusId, false);
       clearConversationStreamStatus(streamConvId);
@@ -2426,12 +2463,15 @@ export default function HomePage() {
             </div>
             <span className="font-bold text-white tracking-wide">RintisAI</span>
           </div>
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="md:hidden p-1.5 hover:bg-white/5 text-gray-400 rounded-lg cursor-pointer"
-          >
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-1">
+            <ThemeToggle className="p-1.5 hover:bg-white/5 text-gray-400 rounded-lg cursor-pointer" />
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="md:hidden p-1.5 hover:bg-white/5 text-gray-400 rounded-lg cursor-pointer"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* New Chat Action */}
@@ -2840,7 +2880,7 @@ export default function HomePage() {
                             ))}
                           </div>
                         )}
-                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                        <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                       </div>
                     ) : (
                       msg.content === "" && activeChatBusy && index === messages.length - 1 ? (
@@ -2871,7 +2911,7 @@ export default function HomePage() {
                             <Copy size={13} />{copiedResponseIndex === index ? "Copied" : "Copy"}
                           </button>
                           <div
-                            className="message-content"
+                            className="message-content break-words"
                             onClick={handleMessageContentClick}
                             dangerouslySetInnerHTML={{ __html: formatMessageContent(msg.content) }}
                           />
@@ -2879,6 +2919,11 @@ export default function HomePage() {
                             <div className="mt-2 flex items-center gap-1.5 text-[11px] text-indigo-300">
                               <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
                               {getStreamStatusLabel(activeStreamStatus)}
+                            </div>
+                          )}
+                          {msg.finishReason === "length" && (
+                            <div className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300 leading-relaxed">
+                              Response terpotong oleh batas token. Coba ketik &quot;Lanjutkan&quot; atau kirim ulang dengan instruksi lebih ringkas.
                             </div>
                           )}
                         </div>
@@ -2891,6 +2936,26 @@ export default function HomePage() {
             </div>
           )}
         </div>
+
+        {/* Scroll to top / bottom floating buttons */}
+        {showScrollTop && (
+          <button
+            onClick={() => chatScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })}
+            className="absolute top-20 right-4 z-20 p-2.5 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-gray-300 hover:bg-white/20 hover:text-white transition cursor-pointer shadow-lg"
+            title="Scroll to top"
+          >
+            <ChevronUp size={18} />
+          </button>
+        )}
+        {showScrollBottom && (
+          <button
+            onClick={() => chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })}
+            className="absolute bottom-20 right-4 z-20 p-2.5 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-gray-300 hover:bg-white/20 hover:text-white transition cursor-pointer shadow-lg"
+            title="Scroll to bottom"
+          >
+            <ChevronDown size={18} />
+          </button>
+        )}
 
         {/* Input Bar Form */}
         <footer className="p-3 sm:p-6 bg-gradient-to-t from-main via-main to-transparent">
@@ -3020,7 +3085,7 @@ export default function HomePage() {
               onPaste={handlePaste}
               onInput={(e) => {
                 e.target.style.height = "auto";
-                e.target.style.height = Math.min(e.target.scrollHeight, 200) + "px";
+                e.target.style.height = Math.min(e.target.scrollHeight, 360) + "px";
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -3028,9 +3093,9 @@ export default function HomePage() {
                   handleSendMessage(e);
                 }
               }}
-              placeholder={limitExceeded || limitBlocked ? "Usage limit reached — upgrade to continue" : getModelConfig(selectedModel)?.vision ? "Type your message here... (Enter to send, paste images/files)" : "Type your message here... (Enter to send, attach files)"}
+              placeholder={limitExceeded || limitBlocked ? "Usage limit reached - upgrade to continue" : getModelConfig(selectedModel)?.vision ? "Type your message here... (Enter to send, paste images/files)" : "Type your message here... (Enter to send, attach files)"}
               rows={1}
-              className="w-full glass-input pr-14 pl-5 py-4 rounded-2xl text-sm focus:outline-none resize-none overflow-y-hidden shadow-2xl shadow-black/45"
+              className="w-full glass-input pr-14 pl-5 py-4 rounded-2xl text-sm focus:outline-none resize-none overflow-y-auto shadow-2xl shadow-black/45"
             />
             <button
               type={activeChatBusy ? "button" : "submit"}
@@ -3043,7 +3108,7 @@ export default function HomePage() {
             </button>
           </form>
           <p className="text-center text-[10px] text-gray-500 mt-3 font-medium uppercase tracking-wide">
-            RintisAI — Your AI Workspace
+            RintisAI - Your AI Workspace
           </p>
         </footer>
       </main>
@@ -3191,12 +3256,12 @@ export default function HomePage() {
                 <div className="p-4 rounded-xl bg-indigo-500/10 border border-indigo-500/20 mb-5 text-center">
                   <p className="text-xs text-gray-400 mb-2">Transfer exactly</p>
                   <p className="text-2xl font-black text-white">
-                    Rp {upgradeAmount?.toLocaleString("id-ID") || "—"}
+                    Rp {upgradeAmount?.toLocaleString("id-ID") || "-"}
                   </p>
                   <p className="text-xs text-gray-500 mt-2">
-                    Unique code: <span className="text-indigo-300 font-bold text-sm">{upgradeCode || "—"}</span>
+                    Unique code: <span className="text-indigo-300 font-bold text-sm">{upgradeCode || "-"}</span>
                   </p>
-                  <p className="text-[10px] text-gray-500 mt-1">This code identifies your payment — transfer the exact amount above.</p>
+                  <p className="text-[10px] text-gray-500 mt-1">This code identifies your payment - transfer the exact amount above.</p>
                 </div>
 
                 {upgradeError && <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">{upgradeError}</div>}
@@ -3290,7 +3355,7 @@ export default function HomePage() {
                   <p className="text-[11px] uppercase font-bold text-gray-400 tracking-wider mb-3">What happens next</p>
                   <div className="space-y-2.5 text-xs text-gray-400">
                     <p className="flex gap-2"><span className="text-emerald-400 font-bold shrink-0">1.</span> Admin reviews your payment proof and matches the unique code <span className="text-indigo-300 font-bold">{upgradeCode}</span>.</p>
-                    <p className="flex gap-2"><span className="text-emerald-400 font-bold shrink-0">2.</span> Once verified, your plan is activated — usually within 1-24 hours.</p>
+                    <p className="flex gap-2"><span className="text-emerald-400 font-bold shrink-0">2.</span> Once verified, your plan is activated - usually within 1-24 hours.</p>
                     <p className="flex gap-2"><span className="text-emerald-400 font-bold shrink-0">3.</span> You will be notified via WhatsApp when your plan is active.</p>
                   </div>
                 </div>
