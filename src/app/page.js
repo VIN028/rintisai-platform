@@ -1609,7 +1609,7 @@ export default function HomePage() {
       clearTimeout(initTimeout);
       const resetStreamIdleTimeout = () => {
         clearTimeout(streamIdleTimeout);
-        streamIdleTimeout = setTimeout(() => requestController.abort(), 120_000);
+        streamIdleTimeout = setTimeout(() => requestController.abort(), 60_000);
       };
       resetStreamIdleTimeout();
 
