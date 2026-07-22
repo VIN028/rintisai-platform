@@ -1609,7 +1609,7 @@ export default function HomePage() {
       clearTimeout(initTimeout);
       const resetStreamIdleTimeout = () => {
         clearTimeout(streamIdleTimeout);
-        streamIdleTimeout = setTimeout(() => requestController.abort(), 60_000);
+        streamIdleTimeout = setTimeout(() => requestController.abort(), 120_000);
       };
       resetStreamIdleTimeout();
 
@@ -2918,7 +2918,7 @@ export default function HomePage() {
                               {getStreamStatusLabel(activeStreamStatus)}
                             </div>
                           )}
-                          {msg.finishReason === "length" && (
+                          {(msg.finishReason === "length" || msg.finishReason === "max_tokens") && (
                             <div className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300 leading-relaxed">
                               Response terpotong oleh batas token. Coba ketik &quot;Lanjutkan&quot; atau kirim ulang dengan instruksi lebih ringkas.
                             </div>
