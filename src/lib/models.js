@@ -188,7 +188,7 @@ export const MODEL_CONFIG = {
       developer: 200_000,
       claude_api: 200_000,
     },
-    defaultOutputTokens: 16_384,
+    defaultOutputTokens: 32_000,
     maxOutputByPlan: {
       free: 0,
       claude_lite: 64_000,
@@ -226,7 +226,7 @@ export const MODEL_CONFIG = {
       developer: 200_000,
       claude_api: 200_000,
     },
-    defaultOutputTokens: 16_384,
+    defaultOutputTokens: 32_000,
     maxOutputByPlan: {
       free: 0,
       claude_lite: 64_000,
@@ -264,7 +264,7 @@ export const MODEL_CONFIG = {
       developer: 128_000,
       claude_api: 200_000,
     },
-    defaultOutputTokens: 16_384,
+    defaultOutputTokens: 32_000,
     maxOutputByPlan: {
       free: 0,
       claude_lite: 0,
