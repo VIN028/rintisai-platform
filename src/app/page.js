@@ -896,6 +896,15 @@ export default function HomePage() {
     return () => container.removeEventListener("scroll", handleScroll);
   }, []);
 
+  // Attach wheel listener natively to prevent passive listener warning
+  useEffect(() => {
+    const container = chatScrollRef.current;
+    if (!container) return;
+    const handler = (e) => handleChatWheel(e);
+    container.addEventListener("wheel", handler, { passive: false });
+    return () => container.removeEventListener("wheel", handler);
+  }, []);
+
   useEffect(() => {
     const handler = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); const el = document.querySelector("input[placeholder*='Search']"); if (el) el.focus(); }
